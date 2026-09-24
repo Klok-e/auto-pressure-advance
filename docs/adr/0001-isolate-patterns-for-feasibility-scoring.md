@@ -1,0 +1,3 @@
+# Isolate physical patterns for feasibility scoring
+
+The nine PA calibration patterns share one print job and appear together in the plate overview. An automatic detector must locate and crop each pattern from observations; the primary Phase 0 score then uses the resulting one-pattern views, keeping all views of a physical pattern in the same development or held-out split. Human boxes and labels are reference annotations for scoring, not detector inputs during a scored run. Evaluate the full plate's combined behavior separately after the split and model protocol are frozen. This preserves an automatic acquisition step while preventing a development model request from exposing held-out patterns; changing the split after exposure cannot restore a clean held-out test.

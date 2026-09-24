@@ -1,0 +1,3 @@
+# Locate calibration patterns locally before VLM analysis
+
+Phase 0 uses local image processing to find physical calibration-pattern regions and crop them before sending an observation to Luna. The local detector handles geometry and isolation; Luna reads labels, interprets extrusion, and proposes the next region to inspect. This adds a detector that can fail independently, but avoids an extra model call for localization and prevents a full-plate development prompt from exposing held-out patterns. On detection failure, record the failure and request another view of the full pattern; do not silently substitute a manual crop or send a full plate to Luna in a scored trial. Freeze detector settings before held-out scoring.

@@ -1,0 +1,111 @@
+# PA Pattern VLM feasibility
+
+Status: ready-for-agent
+
+## Problem Statement
+
+I want to point a phone at my OrcaSlicer Adaptive Pressure Advance prints and receive a trustworthy PA result without identifying candidate lines or judging extrusion myself. The difficult part is still unproven: a VLM must read faint printed metadata, associate every physical candidate line with its PA value, compare nearby extrusion defects, preserve identity across views, and recognize when another view is needed. Building the full camera application before measuring those abilities would leave its defining behavior unsupported.
+
+I have nine calibration patterns from one print job, ten photographs, and preferred PA values chosen by physical inspection. Some patterns had more than one acceptable line, but I have not recorded their acceptable PA ranges. I want to try GPT-6 Luna first and judge whether its requested follow-up views would help on the physical print.
+
+## Solution
+
+Build a reproducible Phase 0 evaluator that uses local image processing to locate pattern regions and match them across selected still observations, then asks Luna to interpret crops of one physical pattern. It will keep my physical inspection as the independent reference, send model inputs without the preferred answers, validate structured model observations, and report exact recognition, candidate-line selection, uncertainty, and follow-up-view utility. Freeze six patterns for development and three for a held-out within-job pilot before model tuning. Use the results to decide whether to build a small interactive camera prototype or investigate specific visual failures first.
+
+The evaluator must report inconclusive and untested outcomes plainly. It will generate a visual review page with each proposed inspection target highlighted on its source observation so I can rate its usefulness. A pass permits an interactive prototype with specific camera-movement guidance, automatic recapture, and optional phone-light control where available. It does not establish production accuracy or complete the mobile app.
+
+## User Stories
+
+1. As the print owner, I want each physical calibration pattern identified separately from its photographs, so that several observations can contribute to one result.
+2. As the print owner, I want the nine flow and acceleration pairs preserved exactly as printed, so that a result cannot silently move to another pattern.
+3. As the print owner, I want my physically selected preferred PAs kept outside model inputs, so that the test measures interpretation rather than answer recall.
+4. As the print owner, I want an unlabelled candidate line mapped through its neighbouring printed labels and physical order, so that valid half-step selections remain possible.
+5. As the print owner, I want disputed line mappings marked unresolved, so that a guessed PA never becomes a verified reference.
+6. As the print owner, I want unknown acceptable PA ranges recorded as unknown, so that my preferred PA is not misrepresented as the only acceptable value.
+7. As the print owner, I want original photographs preserved and their orientation handled correctly, so that crops and coordinates can be traced to the actual observation.
+8. As an experimenter, I want every detail photograph assigned to the physical pattern or patterns it shows, so that overlapping views do not mix evidence.
+9. As an experimenter, I want the evaluator to locate each calibration pattern automatically in a source observation, so that trial inputs do not depend on my drawing crop boxes.
+10. As an experimenter, I want all views of one calibration pattern placed in one dataset split, so that the held-out check has no same-pattern leakage.
+11. As an experimenter, I want a frozen six-pattern development set and three-pattern held-out set, so that tuning cannot use held-out answers.
+12. As an experimenter, I want held-out patterns absent from development model inputs, so that a full-plate photo cannot leak them into prompts.
+13. As an experimenter, I want readable overviews, relevant details, and incomplete or poor views retained when available, so that the test exposes both successes and failures.
+14. As an experimenter, I want a fixed Luna prompt, schema, inference configuration, and image bundle sequence, so that results are comparable and reproducible.
+15. As an experimenter, I want every model response tied to exact observation IDs and image hashes, so that repeated analysis of the same pixels cannot count as new evidence.
+16. As an experimenter, I want provider errors and cost limits recorded as incomplete trials, so that resource limits cannot look like successful calibration.
+17. As an evaluator, I want the model to distinguish visible labels and features from inferred line identities and PA assessments, so that each conclusion has an inspectable basis.
+18. As an evaluator, I want malformed values, nonexistent images, impossible target boxes, and changed verified identity rejected, so that fluent but inconsistent responses cannot pass.
+19. As an evaluator, I want an overview assessed before its paired detail, so that I can see whether new visual evidence actually changes the interpretation.
+20. As an evaluator, I want contradictions reported explicitly, so that an earlier error cannot be silently overwritten.
+21. As an evaluator, I want the model to return an inconclusive outcome when the view cannot separate nearby candidate lines, so that it does not force a preferred PA.
+22. As the print owner, I want to inspect the model's requested region on the physical print and rate its usefulness, so that follow-up planning is judged by whether the view could resolve the named uncertainty.
+23. As the print owner, I want repeated or irrelevant follow-up targets counted as unhelpful, so that plausible wording does not hide a stalled inspection loop.
+24. As an evaluator, I want exact PA agreement and one-candidate-line agreement reported separately, so that a near miss is not counted as an exact selection.
+25. As an evaluator, I want recognition, metadata, physical line, contradiction, and follow-up outcomes reported with denominators, so that failures have a specific cause.
+26. As a future phone user, I want a passing feasibility result to lead to camera-positioning guidance and automatic recapture, so that I never have to select a test line manually.
+27. As a future phone user, I want the app to try phone light only when supported and useful, so that it can improve a dark view without depending on unavailable hardware.
+28. As a future phone user, I want the app to distinguish completed from inconclusive calibration, so that an uncertain image never produces a falsely confirmed PA.
+29. As an experimenter, I want overview and close-up pattern regions matched automatically, so that the model never compares lines from two different physical patterns as one test.
+30. As the print owner, I want each inspection target highlighted on its source photograph with the named uncertainty, so that I can rate its usefulness without interpreting coordinates.
+
+## Implementation Decisions
+
+- Use the glossary terms **print job**, **calibration pattern**, **candidate line**, **observation**, **pattern region**, **pattern identity**, **inspection target**, **preferred PA**, and **acceptable PA range**. One print job contains nine calibration patterns; an observation may show multiple pattern regions; multiple observations may show the same physical pattern.
+- The existing assets are ten 4000 × 3000 JPEG observations from one batch. The project contains metadata-scrubbed copies whose oriented decoded pixels match the originals; the original files remain in Downloads. Apply EXIF orientation before interpretation, and hash project copies and derived crops or masks. Do not infer pattern identity from image order or camera position.
+- Use the user's independent physical inspection as the pilot reference. The confirmed `(preferred PA, printed flow, printed acceleration)` triplets are:
+
+| Preferred PA | Flow | Acceleration |
+| ---: | ---: | ---: |
+| 0.03 | 15.1 | 4000 |
+| 0.035 | 7.57 | 4000 |
+| 0.04 | 3.79 | 4000 |
+| 0.045 | 15.1 | 2000 |
+| 0.055 | 7.57 | 2000 |
+| 0.06 | 3.79 | 2000 |
+| 0.065 | 15.1 | 1000 |
+| 0.07 | 7.57 | 1000 |
+| 0.075 | 3.79 | 1000 |
+
+- The table is sorted by PA and supplies no tie-break policy. Printed number labels advance by `0.01`, while this batch has a physical candidate-line increment of `0.005`. A candidate line between two numbered lines has a real generated PA when visible anchor labels and physical order establish it. Project or G-code files are optional cross-checks if print evidence conflicts; they are not prerequisites to this pilot.
+- Keep `acceptable_pa_values` unknown. If later physical inspection disputes a preferred PA or selected physical line, retain the disagreement and make that pattern unscorable for a clean exact-value pass until its reference is resolved.
+- Before tuning, the implementing agent independently annotates stable calibration-pattern IDs, visible printed metadata, numbered-label anchors, preferred physical line positions from the user's table and photographs, and the pattern membership of each observation. These annotations are scoring references, never input coordinates for a scored detector run. This is experiment preparation, not a task in the eventual app. If a selected line cannot be located from those sources, leave its identity unresolved rather than using Luna's answer. Record missing or ambiguous photographic coverage. Select and freeze six development and three held-out patterns, all observation hashes, planned bundles, and the model protocol. The allocation may account for available clear and difficult views, but may not use model outcomes. Local image processing must find pattern regions and isolate each pattern before Luna receives it; evaluate the full-plate combined behavior separately only after the split and protocol are frozen.
+- When the detector cannot isolate a pattern region, record a localization failure and request a new view showing the full pattern. Phase 0 may accept a new selected still for this attempt, but a scored run must not use a manually repaired crop or pass the full plate to Luna. Without a usable new view, the pattern remains unresolved.
+- Match pattern regions across overview and detail observations automatically before a multi-image Luna request. Use local visual registration and verified printed metadata where available; plate position alone cannot establish pattern identity. Reference annotations may score a match, but cannot supply it during a scored run. If matching is uncertain, keep the observations separate and request a view that can establish identity.
+- A close-up with unreadable flow or acceleration marks may inherit those values from an earlier verified overview only when the automatic match reliably establishes the same pattern identity. Cite the overview and the match as provenance; do not report the close-up marks as newly read. If the match is uncertain or new visible metadata conflicts, request another overview and keep the result unresolved.
+- The first Luna baseline applies source EXIF orientation and automatic cropping only. Do not sharpen, change contrast, upscale, or rectify perspective in that baseline. Preserve crop coordinates and hashes. If a measured failure suggests image enhancement would help, test it under a new protocol version rather than changing held-out inputs in place.
+- Use one principal test seam, confirmed by the user: an evaluator command consumes the frozen manifest and emits validated per-pattern trial records plus an aggregate report. Put the provider call behind a replaceable adapter so the command can be exercised with recorded responses, then run the same command against the real API for the feasibility measurement. The repo currently has no application or prior test harness to preserve.
+- Start with `gpt-6-luna` through the Responses API, medium reasoning, no tools, stored Responses, and a versioned prompt with strict structured output. Chain the overview and detail requests through the provider's response state; save response IDs, exact inputs, and structured outputs for local scoring, without building a conversation store. Send selected still observations at original detail when supported. If that setting is rejected, record it and start a separately versioned high-detail protocol; do not silently change the baseline. Model availability for this account remains untested.
+- Keep preferred PAs, human extrusion judgments, and reference annotations out of model inputs. The first view must not include verified flow, acceleration, or candidate-line mapping because those are scored outputs. A later view may receive prior model observations with their evidence references, but never the independent answer key.
+- The response describes supported-pattern detection, visible metadata and labels, candidate-line mapping, observed corner or transition features, categorical interpretation, plausible candidates, uncertainty or inconclusive state, exact evidence observation IDs, and at most one requested region with a reason and normalized source-image coordinates. The model proposes a target region; it does not issue camera commands or finalize calibration.
+- Validate both schema and semantics. Reject unknown labels, invalid coordinates, nonexistent evidence images, candidate values unsupported by visible anchors and line order, metadata conflicts, and silent changes to established pattern identity. A repeated assessment of the same image is not independent evidence. Corrections to earlier interpretations must cite stronger new observations and flag the contradiction.
+- Run one request for each predefined bundle: an overview or deliberately incomplete view first, then the overview plus a relevant detail where available. Retry transport or provider failures only with identical inputs. Do not sample an uncertain image repeatedly in search of a confident answer.
+- Save prompt/schema versions and hashes, model and endpoint, settings, input IDs and SHA-256 hashes, provider response ID, structured response, validation result, token usage, latency, cost, and errors. Keep raw selected stills and experiment outputs only as needed for reproducibility; provide deletion of working copies. Never stream video or expose credentials in client code, fixtures, or reports.
+- Cap the initial experiment at 30 model calls or US$5 of recorded API spend. Hitting a cap ends the affected trial as incomplete. A provider failure, missing view, or unresolved reference never becomes evidence for a successful result.
+- The print owner rates each of three incomplete held-out target proposals `useful`, `unhelpful`, or `uncertain` by inspecting the physical region and whether a clearer view could separate the named remaining candidates. A newly captured follow-up may test actual resolution under the unchanged protocol; keep that result separate from the usefulness rating.
+- Generate a local visual review page for inspection targets. Show the target overlay on its source observation, the uncertainty it is meant to resolve, and `useful`, `unhelpful`, and `uncertain` rating controls. Persist the chosen rating with the target and observation IDs in a machine-readable result for scoring. This is an experiment review tool, not the future phone camera interface.
+- A passing result permits only a small interactive camera prototype. The future prototype must guide camera movement, reassess visibility and quality, recapture automatically, and may control the phone light when supported. It must not require manual candidate-line or corner selection.
+
+## Testing Decisions
+
+- Test observable behavior at the evaluator-command seam: given a frozen manifest and model response, inspect emitted validated trial records, report counts, and exit outcome. Replace the provider response only at its external boundary for deterministic checks. Avoid tests of private prompt-builder helpers or copies of schema implementation logic. There is no existing application test prior art in this repo; the local tracker and photo inventory are planning artifacts, not tests.
+- Verify that the detector locates physical calibration patterns from source observations without scored-run human boxes, that automatic matching associates overview and detail regions with the same physical pattern, that splitting is by physical pattern, and that a development model input contains no visible held-out pattern. A failed localization must emit a new-view request and remain a detector failure if unresolved; no manual crop or full-plate Luna fallback may turn it into a pass. An uncertain match must remain unresolved, and a wrong match must not silently merge evidence. Report localization and matching errors separately from Luna's interpretation errors. A held-out result is scored once with the frozen protocol; any subsequent tuning consumes that cohort as development data.
+- Test a close-up whose metadata marks are unreadable but whose pattern region matches a verified overview: its inherited flow and acceleration must retain both provenance references. An uncertain match or conflicting visible metadata must request another overview rather than silently reassigning the pattern.
+- Verify that EXIF rotation and derived-crop coordinates are traceable to original observation hashes, and that an identical image cannot be treated as a second independent view.
+- Verify that validation rejects unsupported PA or metadata, invented line IDs, missing evidence observations, out-of-bounds target regions, and silent changes to a verified pattern identity. Verify that contradictory views lead to explicit contradiction or inconclusive status rather than automatic confirmation.
+- Verify that the report preserves provider errors, missing views, exhausted budgets, unresolved references, and rejected responses as failures or untested cases. It must never fabricate a model assessment or count an incomplete trial as passed.
+- Verify that the review page renders each inspection target on the correct oriented source observation and that its rating is attributed to the correct target and observation. A rating must not be treated as proof that a newly captured view actually resolved the uncertainty.
+- On real held-out observations, report counts and denominators for supported-pattern recognition, exact flow and acceleration, label-to-line association where independently verifiable, correct physical candidate line, exact preferred PA, PA within one physical increment (`0.005`), inconclusive outcomes, validation failures, contradictions, target usefulness, token usage, cost, and latency. Report exact and one-line agreement separately.
+- The **within-job pilot pass rule** is fixed before the held-out run: all three held-out patterns are automatically localized and correctly matched across the permitted views, then recognized with exact flow and acceleration; all three finish with the exact user-preferred PA and correct physical candidate line after the permitted overview/detail sequence; there are zero invented values or image references, wrong evidence merges, silent verified-identity changes, or confirmed outcomes despite material unresolved contradictions; and at least two of three incomplete-view targets are rated useful by the print owner. An absent, repeated, irrelevant, or uncertain target does not count as useful.
+- Report clear successes, incorrect selections, label or metadata errors, unresolved cases, useful and unhelpful targets, and untested capabilities with linked observation and response IDs. Do not claim acceptable-range accuracy, ambiguous-case detection, unsupported-pattern specificity, live guidance quality, or performance across print jobs without independent examples that support those claims.
+
+## Out of Scope
+
+- Building the Angular PWA, live camera preview, automatic still capture, preview overlays, movement controller, torch control, persistent sessions, or Adaptive PA table export in Phase 0.
+- Printer control, automatic printing, arbitrary calibration generators, non-herringbone tests, or support for older OrcaSlicer patterns.
+- Treating the three held-out patterns from one print job as proof of general reliability. A full application remains gated on independently printed jobs, annotated acceptable and inconclusive cases, real-phone acquisition tests, and physical validation prints.
+- Filling missing acceptable PA ranges with model guesses or requiring the Orca project or G-code when the physical reference and markings agree.
+
+## Further Notes
+
+- The [wayfinding map](map.md) and its resolved tickets record how this scope was chosen. [ADR 0001](../../docs/adr/0001-isolate-patterns-for-feasibility-scoring.md) records isolated-pattern scoring, [ADR 0002](../../docs/adr/0002-locate-patterns-locally-before-vlm.md) records local localization, and [ADR 0003](../../docs/adr/0003-match-patterns-across-observations.md) records cross-view matching. The [photo inventory](research/photo-inventory.md) lists the ten original images and hashes; [pattern research](research/orca-pattern-semantics.md) records OrcaSlicer source findings. [OrcaSlicer's generator](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/src/libslic3r/calib.cpp) assigns a PA to every candidate line while numbering only alternate lines.
+- The ten photographs now have metadata-scrubbed project copies under `fixtures/images/`. Other expected Phase 0 deliverables are `services/api/scripts/evaluate_vlm.py`, fixture manifests and independent annotations, a versioned prompt and schema, and `docs/vlm-feasibility.md`; these do not yet exist. The photographs have not been sent to a model API, and no VLM result has been measured.
+- The immediate preparation is to identify the patterns visible in each photograph, record physical line anchors, and freeze the split and input bundles. If the existing photos do not provide a required held-out incomplete/detail view, capture that view before scoring or report the gate as untested. The user's physical inspection remains the reference; model output must never repair missing ground truth.
