@@ -47,6 +47,13 @@ def covered_fraction(box: tuple[int, int, int, int], target: list[int]) -> float
     return intersection / ((target[2] - target[0]) * (target[3] - target[1]))
 
 
+def box_overlap(a: list[float], b: list[float]) -> float:
+    intersection = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return intersection / (area_a + area_b - intersection) if area_a + area_b > intersection else 0.0
+
+
 def select_pair(pattern_id: str, detail_id: str, manifest: dict, detections: dict) -> dict:
     observations = manifest["observations"]
     overview_id = next((o for o in manifest["patterns"][pattern_id]["observation_ids"] if is_overview(observations[o])), None)
@@ -64,6 +71,31 @@ def select_pair(pattern_id: str, detail_id: str, manifest: dict, detections: dic
         return {"status": "matching_uncertain", "reason": f"{len(matches)} unique matches", "requested_view": "show the full pattern with readable metadata"}
     overview, detail, registration = matches[0]
     return {"status": "matched", "overview_id": overview_id, "detail_id": detail_id, "overview": overview, "detail": detail, "registration": registration}
+
+
+def select_overview_only(pattern_id: str, manifest: dict, detections: dict) -> dict:
+    observations = manifest["observations"]
+    overview_id = next((o for o in manifest["patterns"][pattern_id]["observation_ids"] if is_overview(observations[o])), None)
+    if overview_id is None:
+        return {"status": "missing_view", "reason": "no overview"}
+    regions = detections[overview_id]
+    if not regions:
+        return {"status": "localization_failure", "reason": "no complete pattern region", "requested_view": "show the full pattern"}
+    claimed = set()
+    for other_id, other in manifest["patterns"].items():
+        if other_id == pattern_id or overview_id not in other["observation_ids"]:
+            continue
+        detail_id = next((o for o in other["observation_ids"] if not is_overview(observations[o])), None)
+        if detail_id is None:
+            return {"status": "matching_uncertain", "reason": "multiple patterns lack detail views", "requested_view": "show the full pattern with readable metadata"}
+        pair = select_pair(other_id, detail_id, manifest, detections)
+        if pair["status"] != "matched":
+            return {"status": "matching_uncertain", "reason": f"sibling {other_id} could not be registered", "requested_view": "show the full pattern with readable metadata"}
+        claimed.add(tuple(pair["overview"]["bbox"]))
+    remaining = [region for region in regions if tuple(region["bbox"]) not in claimed]
+    if len(remaining) != 1:
+        return {"status": "matching_uncertain", "reason": f"{len(remaining)} unmatched overview regions", "requested_view": "show the full pattern with readable metadata"}
+    return {"status": "matched", "overview_id": overview_id, "overview": remaining[0], "registration": {"method": "unique_unmatched_region", "registered_siblings": len(claimed)}}
 
 
 def check_reference(pattern_id: str, pair: dict, reference: dict | None, manifest: dict) -> str | None:
@@ -118,14 +150,11 @@ def aggregate(trials: list[dict], split: str, ratings: list[dict]) -> dict:
     counts = {"confirmed": 0, "localization_failure": 0}
     final = {}
     attempted = set()
-    latest_score = {}
     for trial in trials:
         counts[trial["status"]] = counts.get(trial["status"], 0) + 1
         final[trial["pattern_id"]] = trial
         if trial.get("call_attempted"):
             attempted.add(trial["pattern_id"])
-        if trial.get("score") is not None:
-            latest_score[trial["pattern_id"]] = trial["score"]
     metrics = {}
     for key in ("supported_pattern", "flow_exact", "acceleration_exact", "preferred_pa_exact", "preferred_pa_within_one_line", "physical_line_correct", "label_line_correct"):
         values = []
@@ -137,7 +166,7 @@ def aggregate(trials: list[dict], split: str, ratings: list[dict]) -> dict:
                 continue
             if key == "label_line_correct" and not trial.get("label_line_scorable"):
                 continue
-            values.append((latest_score.get(pattern_id) or {}).get(key) is True)
+            values.append((trial.get("score") or {}).get(key) is True)
         metrics[key] = {"correct": sum(value is True for value in values), "denominator": len(values)}
     usage = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "cost_complete": True, "latency_ms": 0.0}
     for trial in trials:
@@ -160,8 +189,22 @@ def aggregate(trials: list[dict], split: str, ratings: list[dict]) -> dict:
         else:
             usage["cost_usd"] += cost
     rating_counts = {label: sum(item["rating"] == label for item in ratings) for label in ("useful", "unhelpful", "uncertain", "unrated")}
-    held_out_targets = [item for item in ratings if item["pattern_id"] in final and final[item["pattern_id"]]["split"] == "held_out" and item["step"] == "overview"]
-    useful_held_out = sum(item["rating"] == "useful" and not item.get("repeated", False) for item in held_out_targets)
+    held_out_targets = []
+    seen_targets = []
+    for item in ratings:
+        trial = next((trial for trial in trials if trial["pattern_id"] == item["pattern_id"] and trial["step"] == item["step"] and trial.get("response_id") == item["response_id"]), None)
+        if trial is None or trial["split"] != "held_out" or trial["status"] not in {"inconclusive", "contradiction"} or item["step"] != "overview":
+            continue
+        repeated = any(
+            item["source_sha256"] == prior["source_sha256"]
+            and item["observation_id"] == prior["observation_id"]
+            and box_overlap(item["box"], prior["box"]) >= 0.8
+            for prior in seen_targets
+        )
+        if not repeated:
+            held_out_targets.append(item)
+            seen_targets.append(item)
+    useful_held_out = sum(item["rating"] == "useful" for item in held_out_targets)
     held_out = [trial for trial in final.values() if trial["split"] == "held_out"]
     pilot_pass = None
     if split in {"all", "held_out"} and len(held_out) == 3:
@@ -202,16 +245,12 @@ def saved_protocol(output_dir: Path, original: dict) -> dict:
 
 def rate_existing(output_dir: Path, rating_path: Path, reference_path: Path | None) -> int:
     trials = json.loads((output_dir / "trials.json").read_text())
-    if reference_path:
-        reference = json.loads(reference_path.read_text())
-        for trial in trials:
-            pattern = reference["patterns"].get(trial["pattern_id"])
-            anchor = pattern["preferred_line"].get("pixel_anchor") if pattern else None
-            trial["has_reference"] = pattern is not None
-            trial["physical_line_scorable"] = anchor is not None
-            trial["label_line_scorable"] = anchor is not None and pattern["preferred_line"]["mapping"] == "numbered_anchor"
     report_path = output_dir / "report.json"
     original = json.loads(report_path.read_text())
+    if reference_path:
+        saved_hash = original.get("input_provenance", {}).get("reference_sha256")
+        if saved_hash is None or hashlib.sha256(reference_path.read_bytes()).hexdigest() != saved_hash:
+            raise ValueError("ratings-only requires the original reference; saved reference hash is missing or differs")
     targets = json.loads((output_dir / "target_ratings.json").read_text())
     ratings = verified_ratings(targets, json.loads(rating_path.read_text()))
     updated = {**original, **aggregate(trials, original["split"], ratings)}
@@ -229,6 +268,12 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("reference is required to guard held-out regions")
     bundles = [bundle for bundle in manifest["bundles"] if args.split == "all" or manifest["patterns"][bundle["pattern_id"]]["split"] == args.split]
     needed = {item for bundle in bundles for item in manifest["patterns"][bundle["pattern_id"]]["observation_ids"]}
+    overview_only = [bundle["pattern_id"] for bundle in bundles if not any(not is_overview(manifest["observations"][item]) for item in manifest["patterns"][bundle["pattern_id"]]["observation_ids"])]
+    for pattern_id in overview_only:
+        overview_ids = {item for item in manifest["patterns"][pattern_id]["observation_ids"] if is_overview(manifest["observations"][item])}
+        for other in manifest["patterns"].values():
+            if overview_ids.intersection(other["observation_ids"]):
+                needed.update(other["observation_ids"])
     detections = {item: vision.locate_regions(manifest["observations"][item]["resolved_path"]) for item in needed}
     provider: LiveProvider | RecordedProvider | None = None
     prior: dict[str, dict[str, Any]] = {}
@@ -245,16 +290,18 @@ def run(args: argparse.Namespace) -> int:
         details = [o for o in bundle["observation_ids"] if not is_overview(manifest["observations"][o])]
         if not details:
             details = [o for o in pattern["observation_ids"] if not is_overview(manifest["observations"][o])]
-        if not details:
-            record.update(status="missing_view", reason="no dedicated detail to establish overview identity")
+        detail_id = details[0] if details else None
+        if bundle["step"] != "overview" and detail_id is None:
+            record.update(status="missing_view", reason="no detail observation for planned bundle")
             continue
-        detail_id = details[0]
-        pair = select_pair(pattern_id, detail_id, manifest, detections)
+        pair = select_pair(pattern_id, detail_id, manifest, detections) if detail_id else select_overview_only(pattern_id, manifest, detections)
         if pair["status"] != "matched":
             record.update(pair)
             continue
         record["registration"] = pair["registration"]
-        record["regions"] = {pair["overview_id"]: pair["overview"]["bbox"], detail_id: pair["detail"]["bbox"]}
+        record["regions"] = {pair["overview_id"]: pair["overview"]["bbox"]}
+        if detail_id:
+            record["regions"][detail_id] = pair["detail"]["bbox"]
         problem = check_reference(pattern_id, pair, reference, manifest)
         if problem:
             record.update(status=problem, reason="automatic match failed independent scoring or split guard")
@@ -265,7 +312,11 @@ def run(args: argparse.Namespace) -> int:
         if calls >= 30 or spent >= 5.0:
             record.update(status="budget_exhausted", reason="30-call or US$5 cap reached")
             continue
-        selected_ids = [pair["overview_id"]] if bundle["step"] == "overview" else [detail_id]
+        if bundle["step"] == "overview":
+            selected_ids = [pair["overview_id"]]
+        else:
+            assert detail_id is not None
+            selected_ids = [detail_id]
         inputs = []
         for observation_id in selected_ids:
             region = pair["overview"] if observation_id == pair["overview_id"] else pair["detail"]

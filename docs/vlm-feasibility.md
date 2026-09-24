@@ -35,10 +35,10 @@ Open `review.html` locally. It displays each valid inspection target on the corr
 ```sh
 python services/api/scripts/evaluate_vlm.py \
   --output-dir results/heldout --ratings-only \
-  --reference fixtures/reference.json --ratings path/to/ratings.json
+  --ratings path/to/ratings.json
 ```
 
-The command joins ratings by target and observation ID; ratings do not prove that a newly acquired view resolved uncertainty.
+The command joins ratings by target and observation ID and preserves the saved reference scoring. If a reference is supplied for a new run, its SHA-256 must match the saved one. Ratings do not prove that a newly acquired view resolved uncertainty.
 
 ## Reading the result
 
@@ -50,7 +50,7 @@ The within-job pass requires all three held-out patterns to localize, match, sho
 
 The first live development baseline used protocol v1. Eight API calls completed for five development patterns; p09 had no dedicated detail. Five responses failed validation because inspection targets extended beyond their source crops. Prompt v2 added explicit normalized crop bounds before the held-out run. The saved v1 responses remain under `results/development-live-network/`.
 
-The v2 development replay used nine calls and US$0.02655 of usage-based cost. All six overview regions localized; the five patterns with dedicated detail views matched automatically. Four of five attempted patterns were recognized as supported, none had exact flow, acceleration, or preferred PA, and seven trial steps were inconclusive. One response reported a contradiction and one failed target-coordinate validation. The report is `results/development-v2/report.json`.
+The v2 development replay used nine calls and US$0.02655 of usage-based cost. All six overview regions localized; the five patterns with dedicated detail views matched automatically. The evaluator at that time skipped p09 because it lacked a detail image. Four of five attempted patterns were recognized as supported, none had exact flow, acceleration, or preferred PA, and seven trial steps were inconclusive. One response reported a contradiction and one failed target-coordinate validation. The report is `results/development-v2/report.json`. The evaluator now isolates the overview-only region by excluding automatically registered sibling regions, but this correction has no live response in the saved pilot.
 
 The single held-out v2 run used five calls and US$0.01293 of usage-based cost. All three overview regions localized and matched their dedicated details. Supported-pattern recognition was 2/3; exact flow, acceleration, selected physical line, and preferred PA were each 0/3. The p03 overview had an invalid inspection-target box, preventing its detail step; p04's detail response reported a contradiction. Two valid incomplete-overview targets were generated, so the required three-target usefulness check is not complete. The print owner has not rated them. The report and visual page are `results/heldout-v2/report.json` and `results/heldout-v2/review.html`.
 
