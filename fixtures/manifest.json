@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "print_job_id": "pa_job_20260924",
+  "observations": {
+    "20260924_191535": {
+      "path": "images/20260924_191535.jpg",
+      "sha256": "0e1b5df56d5b1a162a16ee78dc59be7a47b9b5ddd9a1863e45c18d8c14652191",
+      "role": "plate_overview",
+      "exif_orientation": 3,
+      "oriented_size": [
+        4000,
+        3000
+      ]
+    },
+    "20260924_191541": {
+      "path": "images/20260924_191541.jpg",
+      "sha256": "05e82ad13691b217ff258b6c760fe229b396b01d3f9607bc62758b333c180fc9",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191544": {
+      "path": "images/20260924_191544.jpg",
+      "sha256": "7fc27e63a06da67625c5032b66f01bda660a2c1fa1f11f4a5153429987ca0f27",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191547": {
+      "path": "images/20260924_191547.jpg",
+      "sha256": "5efad9a535ab04f05e3912cb9c8ee3429b1e00653163b775900ea8ceb0d2b3c7",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191551": {
+      "path": "images/20260924_191551.jpg",
+      "sha256": "451beb84e3068fda6872340219a0646b40551e06ea67d366910f5442b8565899",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191553": {
+      "path": "images/20260924_191553.jpg",
+      "sha256": "ab0d58659a23b84150ee88de5a83028c7980dc8beab616210735c8578929d799",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191556": {
+      "path": "images/20260924_191556.jpg",
+      "sha256": "466f82b66c881d7d1abfff6f391d424021df9bd38da84a776bbd47c5b9579b7c",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191559": {
+      "path": "images/20260924_191559.jpg",
+      "sha256": "a38f67cf6281099c8d2878ed27b67b08d1b6d68ee11e6a020e799cd7c6a6fba4",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191602": {
+      "path": "images/20260924_191602.jpg",
+      "sha256": "0258df0a34a97e34afc17c4adb1edc3fd6845ff994d10f958ee54a0c146ccab9",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    },
+    "20260924_191604": {
+      "path": "images/20260924_191604.jpg",
+      "sha256": "62ccb02d6437d9914eb80895b148883310991bb11823070ac9f682ceaac2eb84",
+      "role": "detail",
+      "exif_orientation": 6,
+      "oriented_size": [
+        3000,
+        4000
+      ]
+    }
+  },
+  "patterns": {
+    "p01": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191559"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p02": {
+      "split": "held_out",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191551"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p03": {
+      "split": "held_out",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191541"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p04": {
+      "split": "held_out",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191602"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p05": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191553"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p06": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191544"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p07": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191604"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p08": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191556"
+      ],
+      "detail_coverage": "complete"
+    },
+    "p09": {
+      "split": "development",
+      "observation_ids": [
+        "20260924_191535"
+      ],
+      "detail_coverage": "missing"
+    }
+  },
+  "bundles": [
+    {
+      "pattern_id": "p01",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p01",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191559"
+      ]
+    },
+    {
+      "pattern_id": "p02",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p02",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191551"
+      ]
+    },
+    {
+      "pattern_id": "p03",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p03",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191541"
+      ]
+    },
+    {
+      "pattern_id": "p04",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p04",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191602"
+      ]
+    },
+    {
+      "pattern_id": "p05",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p05",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191553"
+      ]
+    },
+    {
+      "pattern_id": "p06",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p06",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191544"
+      ]
+    },
+    {
+      "pattern_id": "p07",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p07",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191604"
+      ]
+    },
+    {
+      "pattern_id": "p08",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    },
+    {
+      "pattern_id": "p08",
+      "step": "overview_plus_detail",
+      "observation_ids": [
+        "20260924_191535",
+        "20260924_191556"
+      ]
+    },
+    {
+      "pattern_id": "p09",
+      "step": "overview",
+      "observation_ids": [
+        "20260924_191535"
+      ]
+    }
+  ],
+  "overview_isolation": "Automatically isolate one pattern and exclude all other regions before provider input; reference boxes are scoring only."
+}

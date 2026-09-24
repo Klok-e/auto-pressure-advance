@@ -1,0 +1,357 @@
+{
+  "version": 1,
+  "source": "User physical-inspection triplets in .scratch/pa-vlm-feasibility/spec.md; photographed metadata and candidate-line order independently inspected for identity/line mapping. No model results used.",
+  "print_job_id": "pa_job_20260924",
+  "coordinate_system": "pixels after EXIF orientation, xyxy with exclusive right/bottom edge",
+  "patterns": {
+    "p01": {
+      "preferred_pa": 0.065,
+      "printed_flow": 15.1,
+      "printed_acceleration": 1000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 7,
+        "mapping": "unlabelled_line_between_numbered_anchors",
+        "anchor_values": [
+          0.06,
+          0.07
+        ],
+        "physical_position_status": "line_order_visible_but_pixel_anchor_unresolved",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        290,
+        290,
+        1330,
+        1110
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191559",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p02": {
+      "preferred_pa": 0.06,
+      "printed_flow": 3.79,
+      "printed_acceleration": 2000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 6,
+        "mapping": "numbered_anchor",
+        "anchor_values": [
+          0.06
+        ],
+        "physical_position_status": "visible_and_anchored_in_detail",
+        "pixel_anchor": {
+          "observation_id": "20260924_191551",
+          "xy": [
+            1250,
+            2430
+          ],
+          "kind": "approximate V apex on selected numbered candidate line",
+          "tolerance_px": 55
+        }
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_anchored",
+      "overview_region_xyxy": [
+        1330,
+        360,
+        2270,
+        1190
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191551",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p03": {
+      "preferred_pa": 0.04,
+      "printed_flow": 3.79,
+      "printed_acceleration": 4000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 2,
+        "mapping": "numbered_anchor",
+        "anchor_values": [
+          0.04
+        ],
+        "physical_position_status": "visible_and_anchored_in_detail",
+        "pixel_anchor": {
+          "observation_id": "20260924_191541",
+          "xy": [
+            1350,
+            1651
+          ],
+          "kind": "approximate V apex on selected numbered candidate line",
+          "tolerance_px": 55
+        }
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_anchored",
+      "overview_region_xyxy": [
+        2310,
+        490,
+        3090,
+        1230
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191541",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p04": {
+      "preferred_pa": 0.07,
+      "printed_flow": 7.57,
+      "printed_acceleration": 1000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 8,
+        "mapping": "numbered_anchor",
+        "anchor_values": [
+          0.07
+        ],
+        "physical_position_status": "visible_and_anchored_in_detail",
+        "pixel_anchor": {
+          "observation_id": "20260924_191602",
+          "xy": [
+            1450,
+            2620
+          ],
+          "kind": "approximate V apex on selected numbered candidate line",
+          "tolerance_px": 55
+        }
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_anchored",
+      "overview_region_xyxy": [
+        370,
+        1100,
+        1410,
+        1910
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191602",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p05": {
+      "preferred_pa": 0.055,
+      "printed_flow": 7.57,
+      "printed_acceleration": 2000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 5,
+        "mapping": "unlabelled_line_between_numbered_anchors",
+        "anchor_values": [
+          0.05,
+          0.06
+        ],
+        "physical_position_status": "line_order_visible_but_pixel_anchor_unresolved",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        1410,
+        1130,
+        2310,
+        1900
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191553",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p06": {
+      "preferred_pa": 0.045,
+      "printed_flow": 15.1,
+      "printed_acceleration": 2000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 3,
+        "mapping": "unlabelled_line_between_numbered_anchors",
+        "anchor_values": [
+          0.04,
+          0.05
+        ],
+        "physical_position_status": "line_order_visible_but_pixel_anchor_unresolved",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        2310,
+        1230,
+        3130,
+        1940
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191544",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p07": {
+      "preferred_pa": 0.03,
+      "printed_flow": 15.1,
+      "printed_acceleration": 4000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 0,
+        "mapping": "numbered_anchor",
+        "anchor_values": [
+          0.03
+        ],
+        "physical_position_status": "line_order_visible_but_pixel_anchor_unresolved",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        370,
+        1890,
+        1420,
+        2730
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191604",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p08": {
+      "preferred_pa": 0.035,
+      "printed_flow": 7.57,
+      "printed_acceleration": 4000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 1,
+        "mapping": "unlabelled_line_between_numbered_anchors",
+        "anchor_values": [
+          0.03,
+          0.04
+        ],
+        "physical_position_status": "line_order_visible_but_pixel_anchor_unresolved",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        1410,
+        1900,
+        2310,
+        2710
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        },
+        {
+          "observation_id": "20260924_191556",
+          "status": "verified",
+          "evidence": "printed metadata in detail and matching pattern geometry"
+        }
+      ]
+    },
+    "p09": {
+      "preferred_pa": 0.075,
+      "printed_flow": 3.79,
+      "printed_acceleration": 1000,
+      "acceptable_pa_values": null,
+      "preferred_line": {
+        "candidate_index_from_0_03": 9,
+        "mapping": "unlabelled_line_between_numbered_anchors",
+        "anchor_values": [
+          0.07,
+          0.08
+        ],
+        "physical_position_status": "unresolved_from_overview_only",
+        "pixel_anchor": null
+      },
+      "reference_status": "verified_preferred_pa; physical_line_position_unresolved",
+      "overview_region_xyxy": [
+        2340,
+        1950,
+        3160,
+        2710
+      ],
+      "overview_region_basis": "approximate oriented-pixel outline of full pattern and metadata in 20260924_191535; scoring only",
+      "observation_membership": [
+        {
+          "observation_id": "20260924_191535",
+          "status": "verified",
+          "evidence": "printed flow and acceleration in oriented overview region"
+        }
+      ]
+    }
+  },
+  "unresolved_observation_memberships": [
+    {
+      "observation_id": "20260924_191547",
+      "candidate_pattern_ids": [
+        "p09"
+      ],
+      "status": "unresolved",
+      "reason": "Direct printed metadata and cross-view registration do not establish an unambiguous physical identity; excluded from scored bundles."
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["supported_pattern", "pattern_identity", "metadata", "labels", "candidate_lines", "assessment", "inspection_target"],
+  "properties": {
+    "supported_pattern": {"type": "boolean"},
+    "pattern_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pattern_id", "evidence_ids"],
+      "properties": {
+        "pattern_id": {"type": ["string", "null"]},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "metadata": {
+      "type": "object", "additionalProperties": false,
+      "required": ["flow", "acceleration"],
+      "properties": {
+        "flow": {"$ref": "#/$defs/metadata_value"},
+        "acceleration": {"$ref": "#/$defs/metadata_value"}
+      }
+    },
+    "labels": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["line_id", "pa", "evidence_ids"],
+        "properties": {
+          "line_id": {"type": "string"},
+          "pa": {"type": "number"},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "candidate_lines": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["line_id", "pa", "mapping_basis", "anchor_line_ids", "evidence_ids", "apex", "features"],
+        "properties": {
+          "line_id": {"type": "string"},
+          "pa": {"type": ["number", "null"]},
+          "mapping_basis": {"type": "string", "enum": ["visible_label", "anchor_order", "unresolved"]},
+          "anchor_line_ids": {"type": "array", "items": {"type": "string"}},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}},
+          "apex": {
+            "description": "Herringbone apex in normalized oriented-source coordinates inside the cited observation's supplied crop bounds, or null.",
+            "anyOf": [
+              {"type": "object", "additionalProperties": false,
+               "required": ["observation_id", "x", "y"],
+               "properties": {
+                 "observation_id": {"type": "string"},
+                 "x": {"type": "number"},
+                 "y": {"type": "number"}
+               }},
+              {"type": "null"}
+            ]
+          },
+          "features": {"type": "array", "items": {"$ref": "#/$defs/feature"}}
+        }
+      }
+    },
+    "assessment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "selected_line_id", "selected_pa", "plausible_line_ids", "uncertainty", "evidence_ids", "contradiction", "contradiction_reason"],
+      "properties": {
+        "status": {"type": "string", "enum": ["conclusive", "inconclusive", "unsupported"]},
+        "selected_line_id": {"type": ["string", "null"]},
+        "selected_pa": {"type": ["number", "null"]},
+        "plausible_line_ids": {"type": "array", "items": {"type": "string"}},
+        "uncertainty": {"type": "string"},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}},
+        "contradiction": {"type": "boolean"},
+        "contradiction_reason": {"type": ["string", "null"]}
+      }
+    },
+    "inspection_target": {
+      "anyOf": [
+        {"type": "object", "additionalProperties": false, "required": ["observation_id", "box", "reason"],
+         "properties": {
+           "observation_id": {"type": "string"},
+           "box": {"type": "array", "description": "Normalized oriented-source [left, top, right, bottom] entirely inside this observation's supplied crop bounds.", "items": {"type": "number"}},
+           "reason": {"type": "string"}
+         }},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "metadata_value": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "source", "evidence_ids"],
+      "properties": {
+        "value": {"type": ["number", "null"]},
+        "source": {"type": "string", "enum": ["visible", "inherited", "unknown"]},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "feature": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "interpretation", "description", "evidence_ids"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["corner", "transition"]},
+        "interpretation": {"type": "string", "enum": ["under_extrusion", "balanced", "over_extrusion", "unclear"]},
+        "description": {"type": "string"},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
