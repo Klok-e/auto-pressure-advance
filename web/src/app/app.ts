@@ -100,6 +100,25 @@ export class App implements OnInit, OnDestroy {
   async start(resume = false): Promise<void> {
     this.phase.set('starting');
     this.error.set('');
+    this.log.log('camera_preflight', {
+      secureContext: window.isSecureContext,
+      mediaDevices: !!navigator.mediaDevices,
+      origin: location.origin,
+    });
+    if (!window.isSecureContext) {
+      this.fail(
+        'Camera access is blocked on LAN HTTP. Open the trusted HTTPS LAN address.',
+        new Error('insecure_context'),
+      );
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.fail(
+        'This browser does not expose camera access.',
+        new Error('media_devices_unavailable'),
+      );
+      return;
+    }
     try {
       if (!resume || !this.session) {
         await clearStills();
