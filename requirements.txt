@@ -4,3 +4,5 @@ Pillow
 jsonschema
 pytest
 openai>=3.19,<4
+fastapi
+uvicorn

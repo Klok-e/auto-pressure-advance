@@ -1,0 +1,165 @@
+<main class="shell">
+  <header>
+    <b class="mark">∿</b>
+    <div><strong>Adaptive PA</strong><small>Camera experiment</small></div>
+    <button class="icon" aria-label="Download diagnostics" (click)="downloadDiagnostics()">
+      ⇩
+    </button>
+  </header>
+  <section class="stage" [class.live]="phase() === 'scanning' || phase() === 'processing'">
+    <video #preview autoplay playsinline muted aria-label="Rear camera preview"></video>
+    @if (phase() === 'scanning' || phase() === 'processing') {
+      <div class="scrim"></div>
+      <div class="reticle"><i></i><i></i><i></i><i></i></div>
+      <div class="live-badge">● CAMERA LIVE</div>
+      <div class="cue" [attr.data-action]="visualAction()" role="status" aria-live="polite">
+        @if (visualAction() === 'closer' || visualAction() === 'farther') {
+          <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="41" y="39" width="38" height="42" rx="4" />
+            <path d="M49 50h22M49 58h22M49 66h22" />
+            <path
+              class="zoom-arrow"
+              d="M60 9v21m-8-8 8 8 8-8M60 111V90m-8 8 8-8 8 8M9 60h21m-8-8 8 8-8 8M111 60H90m8-8-8 8 8 8"
+            />
+          </svg>
+        } @else if (visualAction() === 'show_full_pattern') {
+          <svg class="pictogram full" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="28" y="27" width="64" height="66" rx="4" />
+            <path d="M42 44h36M42 53h36M42 62h36M42 71h36" />
+            <path
+              class="expand-arrow"
+              d="M31 17 15 1m0 11V1h11M89 17l16-16m-11 0h11v11M31 103l-16 16m0-11v11h11M89 103l16 16m-11 0h11v-11"
+            />
+          </svg>
+        } @else if (visualAction() === 'hold_still') {
+          <svg class="pictogram hold" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="27" />
+            <circle cx="60" cy="60" r="12" />
+            <path d="M60 6v20M60 94v20M6 60h20M94 60h20" />
+          </svg>
+        } @else if (visualAction() === 'improve_lighting') {
+          <svg class="pictogram light" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="25" />
+            <path
+              d="M60 2v18M60 100v18M2 60h18M100 60h18M19 19l14 14m54 54 14 14M101 19 87 33M33 87l-14 14"
+            />
+          </svg>
+        } @else if (visualAction() === 'scan_next') {
+          <svg class="pictogram next" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="11" y="34" width="37" height="51" rx="4" />
+            <rect x="72" y="34" width="37" height="51" rx="4" />
+            <path d="M21 47h17M21 55h17M82 47h17M82 55h17M42 101h40m-10-10 10 10-10 10" />
+          </svg>
+        } @else {
+          <div class="symbol" aria-hidden="true">{{ cue().icon }}</div>
+        }
+        <b>{{ cue().label }}</b>
+      </div>
+      <div class="capture-status">
+        <div>
+          {{ phase() === 'processing' ? '◉ Analyzing selected still' : '◉ Automatic capture on' }}
+        </div>
+        <small>{{ progress() }}</small>
+      </div>
+    }
+  </section>
+  @if (phase() === 'welcome' || phase() === 'starting') {
+    <section class="panel">
+      <small class="eyebrow">ORCASLICER · PA PATTERN</small>
+      <h1>Point. Follow the cue. Get your PA rows.</h1>
+      <p>
+        After one Start tap, the camera finds stable views and takes still photos automatically.
+        Only selected stills are uploaded for AI analysis. Video stays on your phone.
+      </p>
+      <div class="steps">
+        <span>▣<small>Frame print</small></span
+        ><span>◎<small>Hold still</small></span
+        ><span>✓<small>Get rows</small></span>
+      </div>
+      @if (hasSavedSession()) {
+        <button class="primary" (click)="start(true)" [disabled]="phase() === 'starting'">
+          Resume scan
+        </button>
+      }
+      <button
+        [class.primary]="!hasSavedSession()"
+        [class.secondary]="hasSavedSession()"
+        (click)="start()"
+        [disabled]="phase() === 'starting'"
+      >
+        {{ phase() === 'starting' ? 'Opening camera…' : 'Start new scan' }}
+      </button>
+      <small class="muted"
+        >Experimental: uncertain patterns stay inconclusive. Camera access needs HTTPS or
+        localhost.</small
+      >
+    </section>
+  }
+  @if (phase() === 'scanning' || phase() === 'processing') {
+    <footer>
+      <span>● {{ progress() }}</span
+      ><button class="subtle" (click)="stop()">Stop scan</button>
+    </footer>
+    <div class="metrics">{{ metrics() }}</div>
+  }
+  @if (phase() === 'results') {
+    <section class="panel results">
+      <small class="eyebrow">SCAN RESULTS · EXPERIMENTAL</small>
+      <h1>
+        {{ results().rows.length }} verified {{ results().rows.length === 1 ? 'row' : 'rows' }}
+      </h1>
+      @if (results().rows.length) {
+        <table>
+          <thead>
+            <tr>
+              <th>PA</th>
+              <th>Flow</th>
+              <th>Acceleration</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of results().rows; track $index) {
+              <tr>
+                <td>{{ row.pa }}</td>
+                <td>{{ row.flow }}</td>
+                <td>{{ row.acceleration }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <button class="primary" (click)="copy()">
+          {{ copied() ? 'Copied' : 'Copy OrcaSlicer rows' }}
+        </button>
+      } @else {
+        <p>No value was verified. The scan has not produced a safe PA row to paste.</p>
+      }
+      @if (results().unresolved.length) {
+        <p class="warning">{{ results().unresolved.length }} unresolved pattern(s)</p>
+      }
+      @if (results().conflicts.length) {
+        <p class="warning">
+          {{ results().conflicts.length }} conflicting flow/acceleration pair(s) excluded
+        </p>
+      }
+      <button class="secondary" (click)="expandedEvidence.set(!expandedEvidence())">
+        {{ expandedEvidence() ? 'Hide' : 'View' }} evidence
+      </button>
+      @if (expandedEvidence()) {
+        <pre>{{ results() | json }}</pre>
+      }
+      <button class="secondary" (click)="start(true)">Continue scanning</button
+      ><button class="danger" (click)="deleteSession()">Delete session and images</button>
+    </section>
+  }
+  @if (phase() === 'error') {
+    <section class="panel">
+      <h1>Scan paused</h1>
+      <p>{{ error() }}</p>
+      <button class="primary" (click)="start(true)">Retry</button
+      ><button class="secondary" (click)="downloadDiagnostics()">Download diagnostics</button>
+    </section>
+  }
+  @if (error() && phase() !== 'error') {
+    <p class="toast" role="alert">{{ error() }}</p>
+  }
+</main>
