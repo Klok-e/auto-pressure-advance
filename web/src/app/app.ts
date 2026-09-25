@@ -52,7 +52,7 @@ export class App implements OnInit, OnDestroy {
   readonly progress = signal('Ready');
   readonly hasSavedSession = signal(false);
   readonly copied = signal(false);
-  readonly expandedEvidence = signal(false);
+  readonly expandedDetails = signal(false);
   private api = new Api();
   private log = new Diagnostics();
   private camera?: CameraCapture;
@@ -237,6 +237,13 @@ export class App implements OnInit, OnDestroy {
       observations: state.observation_count,
       rows: result.rows.length,
       unresolved: result.unresolved.length,
+      agentSteps: state.patterns.map((pattern) => ({
+        patternId: pattern['id'],
+        phase: pattern['agent_phase'],
+        status: pattern['status'],
+        attempts: pattern['attempts'],
+        reason: pattern['reason'],
+      })),
     });
   }
 

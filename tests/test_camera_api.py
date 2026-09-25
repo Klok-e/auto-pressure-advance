@@ -1,19 +1,19 @@
 """One public API path through an uploaded still and the provider boundary."""
 
 import asyncio
-import hashlib
 import json
 import sys
 from pathlib import Path
 
 import httpx2
+from PIL import Image, ImageEnhance, ImageOps
 
 
 API_DIR = Path(__file__).resolve().parents[1] / "services/api"
 sys.path.insert(0, str(API_DIR))
 
 from pa_app import server  # noqa: E402
-from pa_eval.protocol import build_request  # noqa: E402
+from pa_eval.agent_protocol import build_agent_request  # noqa: E402
 
 
 def test_session_upload_progress_diagnostics_and_deletion(tmp_path, monkeypatch):
@@ -22,23 +22,21 @@ def test_session_upload_progress_diagnostics_and_deletion(tmp_path, monkeypatch)
     calls = []
 
     class RecordedBoundary:
-        def request(self, inputs, previous_response_id=None):
-            calls.append(inputs[0]["observation_id"])
-            observation_id = inputs[0]["observation_id"]
-            response = {
-                "supported_pattern": True,
-                "pattern_identity": {"pattern_id": "OrcaSlicer herringbone PA", "evidence_ids": [observation_id]},
-                "metadata": {
-                    "flow": {"value": None, "source": "unknown", "evidence_ids": []},
-                    "acceleration": {"value": None, "source": "unknown", "evidence_ids": []},
-                },
-                "labels": [], "candidate_lines": [],
-                "assessment": {"status": "inconclusive", "selected_line_id": None, "selected_pa": None, "plausible_line_ids": [], "uncertainty": "Need a closer view of the printed marks", "evidence_ids": [observation_id], "contradiction": False, "contradiction_reason": None},
-                "inspection_target": None,
-            }
-            return {"id": "recorded-camera-1", "status": "completed", "output_text": json.dumps(response), "usage": {"input_tokens": 100, "output_tokens": 30}, "cost_usd": 0.0, "latency_ms": 0.0, "request": build_request(inputs, previous_response_id), "raw": response}
+        def request_agent(self, image_path, phase, previous_response_id=None):
+            request = build_agent_request(image_path, phase, previous_response_id)
+            calls.append((phase, request))
+            responses = [
+                {"status": "supported", "next_view": None, "reason": "Herringbone pattern visible"},
+                {"status": "read", "flow": 15.1, "acceleration": 4000, "next_view": None, "reason": "Printed settings visible"},
+                {"status": "assessed", "pa": 0.05, "line_rank": 5, "next_view": None, "reason": "Best corner"},
+                {"status": "assessed", "pa": 0.05, "line_rank": 6, "next_view": None, "reason": "Best corner"},
+                {"status": "assessed", "pa": 0.05, "line_rank": 5, "next_view": None, "reason": "Best corner"},
+                {"status": "assessed", "pa": 0.05, "line_rank": 5, "next_view": None, "reason": "Best corner"},
+            ]
+            response = responses[len(calls) - 1]
+            return {"id": f"recorded-camera-{len(calls)}", "status": "completed", "output_text": json.dumps(response), "usage": {"input_tokens": 100, "output_tokens": 30}, "cost_usd": 0.0, "latency_ms": 0.0, "request": request, "raw": response}
 
-    monkeypatch.setattr(server, "_provider", lambda: RecordedBoundary())
+    monkeypatch.setattr(server, "_provider", lambda patterns: RecordedBoundary())
     source = Path(__file__).resolve().parents[1] / "fixtures/images/20260924_191604.jpg"
 
     async def exercise():
@@ -52,23 +50,51 @@ def test_session_upload_progress_diagnostics_and_deletion(tmp_path, monkeypatch)
             assert upload.status_code == 200, upload.text
             observation_id = upload.json()["observation_id"]
             assert upload.json()["status"] == "queued"
-            for _ in range(200):
-                observation = (await client.get(f"/api/sessions/{session_id}/observations/{observation_id}", headers=headers)).json()
-                if observation["status"] in {"complete", "failed"}:
-                    break
-                await asyncio.sleep(0.1)
+            async def await_observation(current_id):
+                for _ in range(200):
+                    observation = (await client.get(f"/api/sessions/{session_id}/observations/{current_id}", headers=headers)).json()
+                    if observation["status"] in {"complete", "failed"}:
+                        return observation
+                    await asyncio.sleep(0.1)
+                raise AssertionError("observation processing timed out")
+
+            observation = await await_observation(observation_id)
             assert observation["status"] == "complete", observation
             session = (await client.get(f"/api/sessions/{session_id}", headers=headers)).json()
             assert session["patterns"] and session["patterns"][0]["status"] != "complete"
-            assert session["guidance"]["action"] in {"closer", "show_full_pattern"}
+            assert session["patterns"][0]["agent_phase"] == "metadata"
+            assert session["guidance"]["action"] == "closer"
             assert (await client.get(f"/api/sessions/{session_id}/results", headers=headers)).json()["rows"] == []
             events = (await client.get(f"/api/sessions/{session_id}/diagnostics", headers=headers)).json()["events"]
-            assert any(event["event"] == "model_response" and event["data"]["response_id"] == "recorded-camera-1" for event in events)
-            repeated = await client.post(f"/api/sessions/{session_id}/observations", headers=upload_headers, content=source.read_bytes())
+            responses = [event for event in events if event["event"] == "model_response"]
+            assert len(responses) == 1 and responses[0]["data"]["response_id"] == "recorded-camera-1"
+            response_log = Path(responses[0]["data"]["response_path"]).read_text()
+            assert "<image omitted" in response_log and "data:image" not in response_log
+            assert all("sha" not in json.dumps(event["data"]).lower() for event in events)
+            repeated = await client.post(f"/api/sessions/{session_id}/observations", headers={**upload_headers, "X-Idempotency-Key": "same-photo-again"}, content=source.read_bytes())
             assert repeated.json()["observation_id"] == observation_id
-            assert calls == [observation_id]
+            assert len(calls) == 1 and calls[0][0] == "identify"
+            model_text = calls[0][1]["instructions"] + calls[0][1]["input"][0]["content"][0]["text"] + json.dumps(calls[0][1]["text"])
+            assert all(term not in model_text.lower() for term in ("sha", "hash", "evidence", "observation id"))
             saved_path = Path(session["patterns"][0]["last_image_path"])
-            assert hashlib.sha256(saved_path.read_bytes()).hexdigest() == session["patterns"][0]["source_sha256"]
+            assert saved_path.exists()
+
+            with Image.open(source) as image:
+                oriented = ImageOps.exif_transpose(image).convert("RGB")
+            expected_phases = ["candidate", "verify", "candidate", "verify", "verify"]
+            for index, (factor, expected_phase) in enumerate(zip((1.03, 0.97, 1.06, 0.94, 1.09), expected_phases), 1):
+                view = tmp_path / f"view-{index}.jpg"
+                ImageEnhance.Brightness(oriented).enhance(factor).save(view, quality=93)
+                next_upload = await client.post(f"/api/sessions/{session_id}/observations", headers={**headers, "X-Idempotency-Key": f"view-{index}", "Content-Type": "image/jpeg"}, content=view.read_bytes())
+                assert next_upload.status_code == 200, next_upload.text
+                observation = await await_observation(next_upload.json()["observation_id"])
+                assert observation["status"] == "complete", observation
+                session = (await client.get(f"/api/sessions/{session_id}", headers=headers)).json()
+                assert session["patterns"][0]["agent_phase"] == expected_phase
+                rows = (await client.get(f"/api/sessions/{session_id}/results", headers=headers)).json()["rows"]
+                assert rows == ([] if index < 5 else [{"pa": "0.05", "flow": "15.1", "acceleration": "4000", "pattern_id": session["patterns"][0]["id"]}])
+            assert [phase for phase, _ in calls] == ["identify", "metadata", "candidate", "verify", "candidate", "verify"]
+            assert "previous_response_id" not in calls[3][1] and "previous_response_id" not in calls[5][1]
             assert (await client.delete(f"/api/sessions/{session_id}", headers=headers)).json() == {"deleted": True}
             assert not saved_path.exists()
             assert (await client.get(f"/api/sessions/{session_id}", headers=headers)).status_code == 404

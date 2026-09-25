@@ -286,8 +286,6 @@ export interface components {
             acceleration: string;
             /** Pattern Id */
             pattern_id: string | null;
-            /** Evidence */
-            evidence: string[];
         };
         /** ResultsState */
         ResultsState: {

@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from openai import APIConnectionError, APIStatusError, OpenAI, OpenAIError
 
+from .agent_protocol import build_agent_request
 from .protocol import ENDPOINT, build_request
 
 
@@ -60,15 +61,25 @@ def cost_usd_from_usage(usage: Any) -> float | None:
 class RecordedProvider:
     """Replay one saved response per request, in order, without interpreting results."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, start_index: int = 0):
         data = json.loads(Path(path).read_text())
         if not isinstance(data, list):
             raise ValueError("recorded response fixture must be a JSON array")
         self._responses = data
-        self._index = 0
+        if not 0 <= start_index <= len(data):
+            raise ValueError("recorded response offset is outside the fixture")
+        self._index = start_index
 
     def request(self, inputs: Sequence[Mapping[str, Any]], previous_response_id: str | None = None) -> dict[str, Any]:
         request = build_request(inputs, previous_response_id)
+        return self._next(request)
+
+    def request_agent(self, image_path: str | Path, phase: str,
+                      previous_response_id: str | None = None) -> dict[str, Any]:
+        request = build_agent_request(image_path, phase, previous_response_id)
+        return self._next(request)
+
+    def _next(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._index >= len(self._responses):
             raise ProviderError("recorded responses exhausted")
         raw = self._responses[self._index]
@@ -77,6 +88,9 @@ class RecordedProvider:
             raise ProviderError("recorded response is not an object")
         if "error" in raw:
             raise ProviderError(f"recorded provider error: {raw['error']}", response=raw)
+        if "next_view" in raw and "reason" in raw:
+            return {"id": f"recorded-{self._index}", "status": "completed", "output_text": json.dumps(raw),
+                    "usage": None, "cost_usd": 0.0, "raw": raw, "request": dict(request), "latency_ms": 0.0}
         return _normalize(raw, request, 0.0)
 
 
@@ -96,6 +110,14 @@ class LiveProvider:
 
     def request(self, inputs: Sequence[Mapping[str, Any]], previous_response_id: str | None = None) -> dict[str, Any]:
         request = build_request(inputs, previous_response_id)
+        return self._send(request)
+
+    def request_agent(self, image_path: str | Path, phase: str,
+                      previous_response_id: str | None = None) -> dict[str, Any]:
+        request = build_agent_request(image_path, phase, previous_response_id)
+        return self._send(request)
+
+    def _send(self, request: Mapping[str, Any]) -> dict[str, Any]:
         start = time.monotonic()
         try:
             response = self.client.responses.with_raw_response.create(**request)

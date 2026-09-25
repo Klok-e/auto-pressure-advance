@@ -95,7 +95,6 @@ class ResultRow(BaseModel):
     flow: str
     acceleration: str
     pattern_id: str | None
-    evidence: list[str]
 
 
 class ResultsState(BaseModel):
@@ -224,9 +223,12 @@ async def _cleanup_periodically() -> None:
         _cleanup_expired()
 
 
-def _provider() -> LiveProvider | RecordedProvider:
+def _provider(patterns: list[dict]) -> LiveProvider | RecordedProvider:
     recording = os.getenv("PA_RECORDED_RESPONSES")
-    return RecordedProvider(recording) if recording else LiveProvider()
+    if recording:
+        prior_calls = sum(int(pattern.get("model_calls", 0)) for pattern in patterns)
+        return RecordedProvider(recording, start_index=prior_calls)
+    return LiveProvider()
 
 
 async def _process_one(app: FastAPI, observation_id: str) -> None:
@@ -240,8 +242,8 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
                 return
             now = time.time()
             conn.execute("UPDATE observations SET status='processing', updated_at=? WHERE id=?", (now, observation_id))
-            revision = _revision(conn, row["session_id"], stage="analyzing_evidence")
-            _event(conn, row["session_id"], "observation_processing", observation_id, revision=revision, image_sha256=row["image_sha256"])
+            revision = _revision(conn, row["session_id"], stage="analyzing_pattern")
+            _event(conn, row["session_id"], "observation_processing", observation_id, revision=revision)
             patterns = json.loads(session["patterns"])
             image_path = Path(row["image_path"])
             session_id = row["session_id"]
@@ -251,7 +253,7 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
             result = await asyncio.get_running_loop().run_in_executor(
                 app.state.executor,
                 partial(analyze_observation, image_path, observation_id, patterns,
-                        DATA_DIR / session_id / "work" / observation_id, _provider()),
+                        DATA_DIR / session_id / "work" / observation_id, _provider(patterns)),
             )
             if not isinstance(result, dict) or not isinstance(result.get("patterns"), list) or not isinstance(result.get("guidance"), dict):
                 raise ValueError("engine returned invalid session state")
@@ -270,11 +272,11 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
                     if isinstance(item, dict):
                         safe = {key: item[key] for key in (
                             "pattern_id", "status", "reason", "response_id", "action", "cost_usd", "calls",
-                            "image_sha256", "crop_sha256", "crop_bbox", "boxes", "count", "image_size",
+                            "crop_bbox", "boxes", "count", "image_size", "phase", "step_status",
                             "region_index", "matches", "previous_response_id", "provider_status", "usage",
-                            "latency_ms", "errors", "attempts", "target", "measurement", "response_path",
-                            "error_type", "source_sha256", "image_path", "crop_path",
-                            "gate_reason", "selected_line_id", "assessment_status",
+                            "latency_ms", "errors", "attempts", "measurement", "response_path", "crop_path",
+                            "error_type", "candidate_pa", "candidate_line_rank", "verified_pa", "verified_line_rank",
+                            "next_phase", "next_view",
                         ) if key in item}
                         _event(conn, session_id, str(item.get("event", item.get("type", "engine_event")))[:80], observation_id, **safe)
                 _event(conn, session_id, "observation_complete", observation_id, revision=revision, stage=stage, guidance_action=guidance.get("action"), usage=result.get("usage"))
@@ -413,16 +415,21 @@ async def upload_observation(session_id: str, request: Request, x_idempotency_ke
         if existing:
             path.unlink(missing_ok=True)
             return _observation(existing, session["revision"])
+        digest = hashlib.sha256(payload).hexdigest()
+        duplicate = conn.execute("SELECT * FROM observations WHERE session_id=? AND image_sha256=?", (session_id, digest)).fetchone()
+        if duplicate:
+            path.unlink(missing_ok=True)
+            _event(conn, session_id, "repeated_image", duplicate["id"], new_idempotency_key=idempotency_key)
+            return _observation(duplicate, session["revision"])
         if conn.execute("SELECT COUNT(*) FROM observations WHERE session_id=?", (session_id,)).fetchone()[0] >= 100:
             path.unlink(missing_ok=True)
             raise HTTPException(409, detail={"code": "observation_limit_reached"})
-        digest = hashlib.sha256(payload).hexdigest()
         conn.execute(
             "INSERT INTO observations VALUES(?,?,?,?,?,?,?,?,?,?)",
             (observation_id, session_id, idempotency_key, "queued", str(path), digest, None, None, now, now),
         )
-        revision = _revision(conn, session_id, stage="analyzing_evidence")
-        _event(conn, session_id, "observation_queued", observation_id, revision=revision, image_sha256=digest, bytes=len(payload), width=normalized.width, height=normalized.height)
+        revision = _revision(conn, session_id, stage="analyzing_pattern")
+        _event(conn, session_id, "observation_queued", observation_id, revision=revision, bytes=len(payload), width=normalized.width, height=normalized.height)
     _queue(app, observation_id)
     return {"observation_id": observation_id, "revision": revision, "status": "queued"}
 
@@ -463,7 +470,7 @@ def _results(patterns: list[dict]) -> dict:
         except (KeyError, ValueError, TypeError, InvalidOperation):
             unresolved.append({"id": pattern.get("id"), "status": "inconclusive", "reason": "invalid_measurement"})
             continue
-        row = {"pa": pa, "flow": flow, "acceleration": acceleration, "pattern_id": pattern.get("id"), "evidence": pattern.get("observation_ids", [])}
+        row = {"pa": pa, "flow": flow, "acceleration": acceleration, "pattern_id": pattern.get("id")}
         pair = (flow_value, acceleration_value)
         previous = pairs.get(pair)
         if previous is None:
@@ -471,8 +478,6 @@ def _results(patterns: list[dict]) -> dict:
         elif Decimal(previous["pa"]) != pa_value:
             blocked.add(pair)
             conflicts.append({"flow": flow, "acceleration": acceleration, "pattern_ids": [previous["pattern_id"], row["pattern_id"]]})
-        else:
-            previous["evidence"] = list(dict.fromkeys(previous["evidence"] + row["evidence"]))
     rows = [row for pair, row in pairs.items() if pair not in blocked]
     return {"rows": rows, "unresolved": unresolved, "conflicts": conflicts}
 

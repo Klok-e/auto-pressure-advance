@@ -141,10 +141,10 @@
           {{ results().conflicts.length }} conflicting flow/acceleration pair(s) excluded
         </p>
       }
-      <button class="secondary" (click)="expandedEvidence.set(!expandedEvidence())">
-        {{ expandedEvidence() ? 'Hide' : 'View' }} evidence
+      <button class="secondary" (click)="expandedDetails.set(!expandedDetails())">
+        {{ expandedDetails() ? 'Hide' : 'View' }} details
       </button>
-      @if (expandedEvidence()) {
+      @if (expandedDetails()) {
         <pre>{{ results() | json }}</pre>
       }
       <button class="secondary" (click)="start(true)">Continue scanning</button
