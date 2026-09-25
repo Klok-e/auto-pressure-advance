@@ -4,7 +4,7 @@ This is an experimental camera interface. The earlier three-pattern visual pilot
 
 ## Run on the local network
 
-Find the computer's LAN IPv4 address with `ip -4 addr show`, then substitute it for `YOUR_LAN_IP` below. The phone and computer must be on the same local network. Firefox for Android will load a LAN HTTP page but will not give it camera access; the camera trial needs HTTPS. From the repository root:
+Find the computer's LAN IPv4 address with `ip -4 addr show`. Substitute it for `YOUR_LAN_IP` in the certificate command and phone URLs. The phone and computer must be on the same local network. Firefox for Android will load a LAN HTTP page but will not give it camera access; the camera trial needs HTTPS. From the repository root:
 
 ```bash
 uv pip install --python .venv/bin/python -r requirements.txt
@@ -13,7 +13,7 @@ set -a
 . results/live.env
 set +a
 scripts/create-lan-certificate.sh YOUR_LAN_IP
-.venv/bin/uvicorn app:app --app-dir services/api --host YOUR_LAN_IP \
+.venv/bin/uvicorn app:app --app-dir services/api --host 0.0.0.0 \
   --ssl-certfile results/lan-tls/server.crt --ssl-keyfile results/lan-tls/server.key
 ```
 
@@ -22,10 +22,10 @@ The server reads `OPENAI_API_KEY` from the environment. `results/live.env` is th
 To trust the local certificate on the Android phone, serve **only** its public CA file from a second terminal:
 
 ```bash
-python3 -m http.server 8001 --bind YOUR_LAN_IP --directory results/lan-tls/public
+python3 -m http.server 8001 --bind 0.0.0.0 --directory results/lan-tls/public
 ```
 
-On the phone, download `http://YOUR_LAN_IP:8001/ca.cer`, then use Android Settings to install it as a CA certificate. Stop the temporary file server after the download. Open `https://YOUR_LAN_IP:8000` in Firefox and tap Start. If Firefox still rejects the certificate, open **Settings → About Firefox**, tap the Firefox logo until the debug menu is enabled, then open **Secret settings** and enable **Use third party CA certificates**; fully restart Firefox. If the computer's LAN address changes, remove `results/lan-tls/`, regenerate the certificate for the new address, and reinstall its CA certificate on the phone. Remove the local CA from Android when you finish testing. [Mozilla says current Firefox can use Android's third-party CAs](https://support.mozilla.org/en-US/kb/setting-certificate-authorities-firefox); [camera access requires a secure context](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia). Phone behavior has not yet been validated in this repository.
+On the phone, download `http://YOUR_LAN_IP:8001/ca.cer`, then use Android Settings to install it as a CA certificate. Stop the temporary file server after the download. Open `https://YOUR_LAN_IP:8000` in Firefox and tap Start. `0.0.0.0` listens on every IPv4 interface, so use the computer's firewall if access must be limited to the LAN. If Firefox still rejects the certificate, open **Settings → About Firefox**, tap the Firefox logo until the debug menu is enabled, then open **Secret settings** and enable **Use third party CA certificates**; fully restart Firefox. If the computer's LAN address changes, remove `results/lan-tls/`, regenerate the certificate for the new address, and reinstall its CA certificate on the phone. Remove the local CA from Android when you finish testing. [Mozilla says current Firefox can use Android's third-party CAs](https://support.mozilla.org/en-US/kb/setting-certificate-authorities-firefox); [camera access requires a secure context](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia). Phone behavior has not yet been validated in this repository.
 
 ## Scan and report feedback
 
