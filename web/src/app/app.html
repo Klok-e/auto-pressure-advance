@@ -106,7 +106,7 @@
     <section class="panel results">
       <small class="eyebrow">SCAN RESULTS · EXPERIMENTAL</small>
       <h1>
-        {{ results().rows.length }} verified {{ results().rows.length === 1 ? 'row' : 'rows' }}
+        {{ results().rows.length }} candidate {{ results().rows.length === 1 ? 'row' : 'rows' }}
       </h1>
       @if (results().rows.length) {
         <table>

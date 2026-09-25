@@ -52,33 +52,63 @@ def _crop_bounds(box: tuple[int, int, int, int], size: tuple[int, int]) -> list[
     ]
 
 
-def _candidate_measurement(response: dict, previous: dict | None, observation_id: str) -> dict | None:
+def _candidate_measurement(response: dict, previous: dict | None, observation_id: str) -> tuple[dict | None, str]:
     assessment = response["assessment"]
     if not previous or not response["supported_pattern"] or assessment["status"] != "conclusive" or assessment["contradiction"]:
-        return None
+        return None, "assessment_not_conclusive"
+    earlier = previous.get("last_response")
+    earlier_id = previous.get("last_observation_id")
+    if not earlier or not earlier_id or earlier_id == observation_id:
+        return None, "independent_prior_view_missing"
+    earlier_assessment = earlier["assessment"]
+    if (earlier_assessment["status"] != "conclusive" or earlier_assessment["contradiction"]
+            or earlier_assessment["selected_line_id"] != assessment["selected_line_id"]
+            or not math.isclose(earlier_assessment["selected_pa"], assessment["selected_pa"], abs_tol=1e-8)):
+        return None, "prior_assessment_disagrees"
     if observation_id not in assessment["evidence_ids"]:
-        return None
+        return None, "current_assessment_evidence_missing"
     flow = response["metadata"]["flow"]
     acceleration = response["metadata"]["acceleration"]
     if flow["value"] is None or acceleration["value"] is None:
-        return None
+        return None, "printed_metadata_missing"
     if flow["source"] not in {"visible", "inherited"} or acceleration["source"] not in {"visible", "inherited"}:
-        return None
+        return None, "printed_metadata_unverified"
     line = next((line for line in response["candidate_lines"] if line["line_id"] == assessment["selected_line_id"]), None)
     if line is None or observation_id not in line["evidence_ids"] or not line["apex"] or line["apex"]["observation_id"] != observation_id:
-        return None
-    if line["mapping_basis"] not in {"visible_label", "anchor_order"} or line["pa"] is None:
-        return None
+        return None, "selected_line_not_localized"
+    earlier_lines = {item["line_id"]: item for item in earlier["candidate_lines"]}
+    earlier_line = earlier_lines.get(line["line_id"])
+    if (line["mapping_basis"] != "visible_label" or line["pa"] is None or not earlier_line
+            or earlier_line["mapping_basis"] != "visible_label" or earlier_line["pa"] is None
+            or not math.isclose(earlier_line["pa"], line["pa"], abs_tol=1e-8)
+            or not earlier_line["apex"] or earlier_line["apex"]["observation_id"] != earlier_id):
+        return None, "visible_label_not_corroborated"
     if not math.isclose(line["pa"], assessment["selected_pa"], abs_tol=1e-8):
-        return None
+        return None, "selected_pa_disagrees"
+    current_lines = {item["line_id"]: item for item in response["candidate_lines"]}
+    selected_index = int(line["line_id"][1:])
+    if not all(any(view_id in feature["evidence_ids"] for feature in selected["features"])
+               for view_id, selected in ((earlier_id, earlier_line), (observation_id, line))):
+        return None, "selected_line_features_missing"
+    neighbors = [neighbor for neighbor in (f"l{selected_index - 1}", f"l{selected_index + 1}")
+                 if neighbor != "l-1" and (neighbor in current_lines or neighbor in earlier_lines)]
+    if not neighbors or not all(
+        neighbor in current_lines and neighbor in earlier_lines
+        and current_lines[neighbor]["pa"] is not None and earlier_lines[neighbor]["pa"] is not None
+        and math.isclose(current_lines[neighbor]["pa"], earlier_lines[neighbor]["pa"], abs_tol=1e-8)
+        and any(observation_id in feature["evidence_ids"] for feature in current_lines[neighbor]["features"])
+        and any(earlier_id in feature["evidence_ids"] for feature in earlier_lines[neighbor]["features"])
+        for neighbor in neighbors
+    ):
+        return None, "neighbor_comparison_missing"
     return {
         "pa": assessment["selected_pa"],
         "flow": flow["value"],
         "acceleration": acceleration["value"],
         "line_id": line["line_id"],
-        "evidence_ids": sorted(set(assessment["evidence_ids"] + line["evidence_ids"] + flow["evidence_ids"] + acceleration["evidence_ids"])),
+        "evidence_ids": sorted(set([earlier_id, observation_id] + assessment["evidence_ids"] + line["evidence_ids"] + flow["evidence_ids"] + acceleration["evidence_ids"])),
         "status": "confirmed",
-    }
+    }, "confirmed"
 
 
 def analyze_observation(
@@ -183,7 +213,8 @@ def analyze_observation(
             events.append({"event": "validation_failure", "observation_id": observation_id, "pattern_id": pattern_id, "errors": errors, "response_id": envelope.get("id")})
             continue
         update.update(last_response=response, last_response_id=envelope.get("id"), crop_bounds=bounds, validation_errors=[])
-        measurement = _candidate_measurement(response, matched, observation_id)
+        measurement, gate_reason = _candidate_measurement(response, matched, observation_id)
+        events.append({"event": "measurement_gate", "observation_id": observation_id, "pattern_id": pattern_id, "gate_reason": gate_reason, "selected_line_id": response["assessment"]["selected_line_id"], "assessment_status": response["assessment"]["status"], "response_id": envelope.get("id")})
         target = response.get("inspection_target")
         update["target"] = target
         if measurement:
@@ -195,7 +226,7 @@ def analyze_observation(
             events.append({"event": "unsupported_pattern", "observation_id": observation_id, "pattern_id": pattern_id})
             next_guidance = _guidance("scan_next", "This is not a supported PA pattern.")
         else:
-            reason = "contradiction" if response["assessment"]["contradiction"] else "more_evidence_needed"
+            reason = "contradiction" if response["assessment"]["contradiction"] else gate_reason
             update.update(status="awaiting_detail" if attempts < MAX_VIEWS_PER_PATTERN else "inconclusive", reason=reason)
             next_guidance = _guidance("closer" if target else "show_full_pattern", response["assessment"]["uncertainty"] or "Show a clearer view of the same pattern.", target)
             events.append({"event": "additional_view_needed", "observation_id": observation_id, "pattern_id": pattern_id, "reason": reason, "target": target, "response_id": envelope.get("id")})

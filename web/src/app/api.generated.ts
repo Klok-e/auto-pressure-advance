@@ -250,8 +250,6 @@ export interface components {
         };
         /** ObservationState */
         ObservationState: {
-            /** Id */
-            id: string;
             /** Observation Id */
             observation_id: string;
             /** Revision */
@@ -271,8 +269,6 @@ export interface components {
         };
         /** QueuedObservation */
         QueuedObservation: {
-            /** Id */
-            id: string;
             /** Observation Id */
             observation_id: string;
             /** Revision */

@@ -15,7 +15,7 @@ import sqlite3
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from decimal import Decimal, InvalidOperation
 from functools import partial
 from pathlib import Path
@@ -74,7 +74,6 @@ class SessionState(BaseModel):
 
 
 class QueuedObservation(BaseModel):
-    id: str
     observation_id: str
     revision: int
     status: str
@@ -202,7 +201,7 @@ def _public_session(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
 
 def _observation(row: sqlite3.Row, revision: int) -> dict:
     return {
-        "id": row["id"], "observation_id": row["id"], "session_id": row["session_id"],
+        "observation_id": row["id"], "session_id": row["session_id"],
         "status": row["status"], "revision": revision,
         "result": json.loads(row["result"]) if row["result"] else None,
         "error": json.loads(row["error"]) if row["error"] else None,
@@ -217,6 +216,12 @@ def _cleanup_expired() -> None:
             conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
     for session_id in expired:
         shutil.rmtree(DATA_DIR / session_id, ignore_errors=True)
+
+
+async def _cleanup_periodically() -> None:
+    while True:
+        await asyncio.sleep(3600)
+        _cleanup_expired()
 
 
 def _provider() -> LiveProvider | RecordedProvider:
@@ -269,6 +274,7 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
                             "region_index", "matches", "previous_response_id", "provider_status", "usage",
                             "latency_ms", "errors", "attempts", "target", "measurement", "response_path",
                             "error_type", "source_sha256", "image_path", "crop_path",
+                            "gate_reason", "selected_line_id", "assessment_status",
                         ) if key in item}
                         _event(conn, session_id, str(item.get("event", item.get("type", "engine_event")))[:80], observation_id, **safe)
                 _event(conn, session_id, "observation_complete", observation_id, revision=revision, stage=stage, guidance_action=guidance.get("action"), usage=result.get("usage"))
@@ -313,11 +319,15 @@ async def lifespan(app: FastAPI):
     app.state.session_locks = {}
     app.state.tasks = set()
     app.state.observation_tasks = {}
+    cleanup_task = asyncio.create_task(_cleanup_periodically())
     with _db() as conn:
         pending = [row[0] for row in conn.execute("SELECT id FROM observations WHERE status IN ('queued','processing')")]
     for observation_id in pending:
         _queue(app, observation_id)
     yield
+    cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup_task
     if app.state.tasks:
         await asyncio.gather(*app.state.tasks, return_exceptions=True)
     app.state.executor.shutdown(wait=True)
@@ -414,7 +424,7 @@ async def upload_observation(session_id: str, request: Request, x_idempotency_ke
         revision = _revision(conn, session_id, stage="analyzing_evidence")
         _event(conn, session_id, "observation_queued", observation_id, revision=revision, image_sha256=digest, bytes=len(payload), width=normalized.width, height=normalized.height)
     _queue(app, observation_id)
-    return {"id": observation_id, "observation_id": observation_id, "revision": revision, "status": "queued"}
+    return {"observation_id": observation_id, "revision": revision, "status": "queued"}
 
 
 @app.get("/api/sessions/{session_id}/observations/{observation_id}", response_model=ObservationState)

@@ -350,7 +350,7 @@ export class App implements OnInit, OnDestroy {
     this.phase.set('processing');
     this.progress.set('Analyzing this view');
     const result = await this.api.upload(this.session, blob, key);
-    this.activeObservation = result.observation_id ?? result.id;
+    this.activeObservation = result.observation_id;
     saveActiveObservation(this.activeObservation);
     await removeStill(key);
     this.session.revision = Math.max(this.session.revision, result.revision);
