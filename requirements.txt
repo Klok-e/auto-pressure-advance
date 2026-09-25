@@ -3,3 +3,4 @@ opencv-python
 Pillow
 jsonschema
 pytest
+openai>=3.19,<4

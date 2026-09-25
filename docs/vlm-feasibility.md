@@ -11,10 +11,17 @@ The command at `services/api/scripts/evaluate_vlm.py` reads a frozen manifest, f
 
 ## Run
 
-Install `requirements.txt` in a virtual environment, then run a development replay:
+Create the repo-local virtual environment and install `requirements.txt` before a development replay:
 
 ```sh
-python services/api/scripts/evaluate_vlm.py \
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+Then run:
+
+```sh
+.venv/bin/python services/api/scripts/evaluate_vlm.py \
   --manifest fixtures/manifest.json \
   --reference fixtures/reference.json \
   --split development \
@@ -22,9 +29,9 @@ python services/api/scripts/evaluate_vlm.py \
   --output-dir results/development
 ```
 
-For the live pilot, provide `OPENAI_API_KEY` in the process environment and use `--provider live`. Run development first. Freeze any changes to detector or protocol before one held-out run with `--split held_out`. A live request uses `gpt-6-luna`, medium reasoning, stored Responses, no tools, and original-detail crop input. It never silently changes to a different image-detail setting. A provider rejection or unavailable model is an incomplete trial.
+For the live pilot, provide `OPENAI_API_KEY` in the process environment and use `--provider live`. The live adapter uses the official OpenAI Python SDK. Run development first. Freeze any changes to detector or protocol before one held-out run with `--split held_out`. A live request uses `gpt-6-luna`, medium reasoning, stored Responses, no tools, and original-detail crop input. It never silently changes to a different image-detail setting. A provider rejection or unavailable model is an incomplete trial.
 
-The command stops at 30 attempted model calls or US$5 of recorded cost. Usage-based cost is known only after a provider response; if cost cannot be accounted, the live run stops incomplete. An HTTP failure may have an unknown charge. The provider adapter does not retry with modified inputs.
+The command stops at 30 attempted model calls or US$5 of recorded cost. Usage-based cost is known only after a provider response; if cost cannot be accounted, the live run stops incomplete. An HTTP failure may have an unknown charge. SDK retries are disabled so each evaluator attempt sends at most one API request.
 
 The output directory contains `trials.json`, `report.json`, exact provider envelopes under `responses/`, derived oriented PNGs under `crops/`, and `review.html`. The provider envelopes include the exact request body and input hashes. `--delete-crops` removes working PNG copies after the run; the source observation hashes and crop coordinates remain in trial records.
 
@@ -33,7 +40,7 @@ The output directory contains `trials.json`, `report.json`, exact provider envel
 Open `review.html` locally. It displays each valid inspection target on the corresponding EXIF-oriented source photograph. Rate whether a clearer physical view of that marked region could distinguish the named remaining candidates. Ratings are saved in browser local storage. Select **Download ratings.json**, then update the existing report without making another model call:
 
 ```sh
-python services/api/scripts/evaluate_vlm.py \
+.venv/bin/python services/api/scripts/evaluate_vlm.py \
   --output-dir results/heldout --ratings-only \
   --ratings path/to/ratings.json
 ```

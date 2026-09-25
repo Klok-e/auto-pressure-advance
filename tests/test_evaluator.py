@@ -4,10 +4,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx2
+import pytest
+from openai import OpenAI
 from PIL import Image
 
 
 COMMAND = Path(__file__).resolve().parents[1] / "services/api/scripts/evaluate_vlm.py"
+sys.path.insert(0, str(COMMAND.parents[1]))
+
+from pa_eval.provider import LiveProvider, ProviderError  # noqa: E402
 
 
 def test_unlocatable_pattern_is_reported_without_model_assessment(tmp_path):
@@ -286,3 +292,80 @@ def test_detail_inherits_verified_overview_metadata_with_provenance(tmp_path):
     assert invalid_trial["status"] == "validation_failure"
     assert any("inherited value lacks earlier provenance" in error for error in invalid_trial["validation_errors"])
     assert any("changed verified pattern identity" in error for error in invalid_trial["validation_errors"])
+
+
+def test_live_sdk_preserves_request_chain_and_raw_response(tmp_path):
+    image_path = tmp_path / "crop.png"
+    Image.new("RGB", (4, 4), "white").save(image_path)
+    inputs = [{"observation_id": "overview", "image_path": str(image_path), "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(), "source_bbox": [10, 20, 14, 24], "source_size": [100, 100]}]
+    requests = []
+    responses = [
+        {"id": "first", "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "{\"step\":1}"}]}], "usage": {"input_tokens": 20, "output_tokens": 10}},
+        {"id": "second", "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "{\"step\":2}"}]}], "usage": {"input_tokens": 20, "output_tokens": 10}},
+    ]
+
+    def handle(request):
+        requests.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx2.Response(200, json=responses[len(requests) - 1])
+
+    client = OpenAI(api_key="test-only", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(handle)))
+    provider = LiveProvider(api_key="test-only", client=client)
+    first = provider.request(inputs)
+    second = provider.request(inputs, previous_response_id="first")
+
+    assert first["raw"] == responses[0]
+    assert second["raw"] == responses[1]
+    assert second["output_text"] == '{"step":2}'
+    assert second["request"]["previous_response_id"] == "first"
+    assert [item[:2] for item in requests] == [("POST", "/v1/responses"), ("POST", "/v1/responses")]
+    assert requests[0][2] == first["request"]
+    assert requests[1][2] == second["request"]
+    assert requests[0][2]["model"] == "gpt-6-luna"
+    assert requests[0][2]["input"][0]["content"][1]["detail"] == "original"
+    assert requests[0][2]["reasoning"] == {"effort": "medium"}
+    assert requests[0][2]["store"] is True
+    assert requests[0][2]["tools"] == []
+
+
+def test_live_sdk_translates_http_and_transport_failures_without_retry(monkeypatch, tmp_path):
+    image_path = tmp_path / "crop.png"
+    Image.new("RGB", (4, 4), "white").save(image_path)
+    inputs = [{"observation_id": "overview", "image_path": str(image_path), "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest()}]
+    requests = []
+
+    def failed_status(request):
+        requests.append(request)
+        return httpx2.Response(503, json={"error": {"message": "unavailable"}})
+
+    client = OpenAI(api_key="test-only", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(failed_status)))
+    with pytest.raises(ProviderError) as raised:
+        LiveProvider(api_key="test-only", client=client).request(inputs)
+    assert raised.value.status_code == 503
+    assert raised.value.response == {"error": {"message": "unavailable"}}
+    assert len(requests) == 1
+
+    def disconnected(request):
+        raise httpx2.ConnectError("offline", request=request)
+
+    client = OpenAI(api_key="test-only", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(disconnected)))
+    with pytest.raises(ProviderError, match="transport error"):
+        LiveProvider(api_key="test-only", client=client).request(inputs)
+
+    def timed_out(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    client = OpenAI(api_key="test-only", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(timed_out)))
+    with pytest.raises(ProviderError, match="transport error"):
+        LiveProvider(api_key="test-only", client=client).request(inputs)
+
+    options = {}
+
+    def client_factory(**kwargs):
+        options.update(kwargs)
+        return client
+
+    monkeypatch.setattr("pa_eval.provider.OpenAI", client_factory)
+    LiveProvider(api_key="test-only")
+    assert options["max_retries"] == 0
+    assert options["timeout"] == 120.0
+    assert options["base_url"] == "https://api.openai.com/v1"

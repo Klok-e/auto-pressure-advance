@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from openai import APIConnectionError, APIStatusError, OpenAI, OpenAIError
 
 from .protocol import ENDPOINT, build_request
 
@@ -81,36 +81,37 @@ class RecordedProvider:
 
 
 class LiveProvider:
-    """Direct HTTPS Responses adapter with no silent detail or model fallback."""
+    """SDK Responses adapter with no silent detail or model fallback."""
 
-    def __init__(self, api_key: str | None = None, *, timeout: float = 120.0):
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
+    def __init__(self, api_key: str | None = None, *, timeout: float = 120.0, client: OpenAI | None = None):
+        key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
             raise ProviderError("OPENAI_API_KEY is required for live requests")
-        self.timeout = timeout
+        self.client = client if client is not None else OpenAI(
+            api_key=key,
+            base_url=ENDPOINT.removesuffix("/responses"),
+            timeout=timeout,
+            max_retries=0,
+        )
 
     def request(self, inputs: Sequence[Mapping[str, Any]], previous_response_id: str | None = None) -> dict[str, Any]:
         request = build_request(inputs, previous_response_id)
-        wire = json.dumps(request, separators=(",", ":")).encode("utf-8")
-        http_request = urllib.request.Request(
-            ENDPOINT,
-            data=wire,
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
         start = time.monotonic()
         try:
-            with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
-                raw = json.load(response)
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
+            response = self.client.responses.with_raw_response.create(**request)
+            raw = response.http_response.json()
+        except APIStatusError as exc:
             try:
-                detail: Any = json.loads(body)
+                detail: Any = exc.response.json()
             except ValueError:
-                detail = body
-            raise ProviderError(f"Responses API HTTP {exc.code}", status_code=exc.code, response=detail) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+                detail = exc.response.text
+            raise ProviderError(f"Responses API HTTP {exc.status_code}", status_code=exc.status_code, response=detail) from exc
+        except APIConnectionError as exc:
             raise ProviderError(f"Responses API transport error: {exc}") from exc
+        except OpenAIError as exc:
+            raise ProviderError(f"Responses API error: {exc}") from exc
+        except ValueError as exc:
+            raise ProviderError("Responses API returned invalid JSON") from exc
         latency_ms = (time.monotonic() - start) * 1000
         if not isinstance(raw, dict):
             raise ProviderError("Responses API returned a non-object", response=raw)
