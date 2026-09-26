@@ -48,7 +48,6 @@ export class App implements OnInit, OnDestroy {
   readonly guidance = signal<Guidance>({ action: 'show_full_pattern' });
   readonly results = signal<Results>({ revision: 0, rows: [], unresolved: [], conflicts: [] });
   readonly error = signal('');
-  readonly metrics = signal('');
   readonly progress = signal('Ready');
   readonly hasSavedSession = signal(false);
   readonly copied = signal(false);
@@ -306,9 +305,6 @@ export class App implements OnInit, OnDestroy {
         });
         this.lastQualityLog = Date.now();
       }
-      this.metrics.set(
-        `Sharpness ${quality.sharpness.toFixed(0)} · Light ${quality.brightness.toFixed(0)} · Motion ${quality.motion.toFixed(0)}`,
-      );
       if (!quality.ready) {
         this.stableFrames = 0;
         this.showLocalCue(quality.reason === 'ready' ? 'hold_still' : quality.reason);

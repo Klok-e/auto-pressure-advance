@@ -1,4 +1,5 @@
-<main class="shell">
+@let cameraActive = phase() === 'scanning' || phase() === 'processing';
+<main class="shell" [class.camera-active]="cameraActive">
   <header>
     <b class="mark">∿</b>
     <div><strong>Adaptive PA</strong><small>Camera experiment</small></div>
@@ -6,14 +7,24 @@
       ⇩
     </button>
   </header>
-  <section class="stage" [class.live]="phase() === 'scanning' || phase() === 'processing'">
-    <video #preview autoplay playsinline muted aria-label="Rear camera preview"></video>
-    @if (phase() === 'scanning' || phase() === 'processing') {
-      <div class="scrim"></div>
-      <div class="reticle"><i></i><i></i><i></i><i></i></div>
-      <div class="live-badge">● CAMERA LIVE</div>
-      <div class="cue" [attr.data-action]="visualAction()" role="status" aria-live="polite">
-        @if (visualAction() === 'closer' || visualAction() === 'farther') {
+  <section class="stage" [class.live]="cameraActive" [attr.aria-hidden]="!cameraActive">
+    <video #preview autoplay playsinline [muted]="true" aria-label="Rear camera preview"></video>
+    @if (cameraActive) {
+      <div class="live-badge"><span aria-hidden="true">●</span> Live</div>
+    }
+  </section>
+  @if (cameraActive) {
+    <footer class="scan-controls">
+      <div
+        class="cue"
+        [attr.data-action]="phase() === 'processing' ? 'processing' : visualAction()"
+      >
+        @if (phase() === 'processing') {
+          <svg class="pictogram processing" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="36" />
+            <path d="M60 24a36 36 0 0 1 36 36" />
+          </svg>
+        } @else if (visualAction() === 'closer' || visualAction() === 'farther') {
           <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
             <rect x="41" y="39" width="38" height="42" rx="4" />
             <path d="M49 50h22M49 58h22M49 66h22" />
@@ -53,16 +64,16 @@
         } @else {
           <div class="symbol" aria-hidden="true">{{ cue().icon }}</div>
         }
-        <b>{{ cue().label }}</b>
-      </div>
-      <div class="capture-status">
-        <div>
-          {{ phase() === 'processing' ? '◉ Analyzing selected still' : '◉ Automatic capture on' }}
+        <div class="cue-copy" role="status" aria-live="polite" aria-atomic="true">
+          <b>{{ phase() === 'processing' ? 'Analyzing…' : cue().label }}</b>
+          <small>{{ phase() === 'processing' ? 'Keep the pattern in view' : progress() }}</small>
         </div>
-        <small>{{ progress() }}</small>
       </div>
-    }
-  </section>
+      <button class="stop-scan" (click)="stop()" aria-label="Stop scan">
+        <span aria-hidden="true">■</span> Stop
+      </button>
+    </footer>
+  }
   @if (phase() === 'welcome' || phase() === 'starting') {
     <section class="panel">
       <small class="eyebrow">ORCASLICER · PA PATTERN</small>
@@ -94,13 +105,6 @@
         trusted HTTPS.</small
       >
     </section>
-  }
-  @if (phase() === 'scanning' || phase() === 'processing') {
-    <footer>
-      <span>● {{ progress() }}</span
-      ><button class="subtle" (click)="stop()">Stop scan</button>
-    </footer>
-    <div class="metrics">{{ metrics() }}</div>
   }
   @if (phase() === 'results') {
     <section class="panel results">
