@@ -4,8 +4,34 @@ export type Quality = {
   sharpness: number;
   brightness: number;
   motion: number;
+  rawMotion: number;
   fingerprint: Uint8Array;
 };
+
+function motionAfterSmallShift(
+  current: Uint8Array,
+  previous: Uint8Array,
+  width: number,
+  height: number,
+): number {
+  let best = Infinity;
+  // Allow hand tremor without treating high-contrast print edges as a large movement.
+  for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      let difference = 0;
+      let count = 0;
+      for (let y = 3; y < height - 3; y += 2) {
+        for (let x = 3; x < width - 3; x += 2) {
+          const index = y * width + x;
+          difference += Math.abs(current[index] - previous[index + dy * width + dx]);
+          count++;
+        }
+      }
+      best = Math.min(best, difference / count);
+    }
+  }
+  return best;
+}
 
 type PhotoTrack = MediaStreamTrack & {
   getCapabilities?: () => MediaTrackCapabilities & { torch?: boolean };
@@ -85,9 +111,10 @@ export class CameraCapture {
         );
       }
     }
-    this.last = gray;
     const brightness = sum / gray.length;
-    const motionScore = motion / gray.length;
+    const rawMotion = motion / gray.length;
+    const motionScore = this.last ? motionAfterSmallShift(gray, this.last, width, height) : 0;
+    this.last = gray;
     const sharpnessScore = sharpness / ((width - 2) * (height - 2));
     const fingerprint = new Uint8Array(64);
     for (let y = 0; y < 8; y++)
@@ -95,10 +122,10 @@ export class CameraCapture {
     const reason =
       brightness < 55 || brightness > 220 || clipped / gray.length > 0.7
         ? 'improve_lighting'
-        : motionScore > 9
-          ? 'hold_still'
-          : sharpnessScore < 13
-            ? 'focus'
+        : sharpnessScore < 13
+          ? 'focus'
+          : motionScore > 18
+            ? 'hold_still'
             : 'ready';
     return {
       ready: reason === 'ready' && hadLast,
@@ -106,6 +133,7 @@ export class CameraCapture {
       sharpness: sharpnessScore,
       brightness,
       motion: motionScore,
+      rawMotion,
       fingerprint,
     };
   }

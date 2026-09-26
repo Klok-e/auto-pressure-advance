@@ -40,6 +40,7 @@ const phaseLabels: Record<string, string> = {
   candidate: 'Comparing the corners',
   verify: 'Checking a second view',
 };
+const CAPTURE_STABLE_FRAMES = 2;
 const cues: Record<VisualAction, { icon: string; label: string }> = {
   move_left: { icon: '←', label: 'Move left' },
   move_right: { icon: '→', label: 'Move right' },
@@ -398,6 +399,7 @@ export class App implements OnInit, OnDestroy {
         this.log.log('frame_quality', {
           brightness: +quality.brightness.toFixed(1),
           motion: +quality.motion.toFixed(1),
+          rawMotion: +quality.rawMotion.toFixed(1),
           sharpness: +quality.sharpness.toFixed(1),
           reason: quality.reason,
         });
@@ -420,10 +422,11 @@ export class App implements OnInit, OnDestroy {
       }
       this.gateReason = '';
       this.stableFrames++;
-      this.steadyProgress.set(Math.min(1, this.stableFrames / 3));
+      this.steadyProgress.set(Math.min(1, this.stableFrames / CAPTURE_STABLE_FRAMES));
       this.setActivity('steadying');
       this.setCue('hold_still');
-      if (this.stableFrames < 3 || Date.now() - this.lastCaptureAt < 3000) return;
+      if (this.stableFrames < CAPTURE_STABLE_FRAMES || Date.now() - this.lastCaptureAt < 3000)
+        return;
       await this.capture(quality);
     } catch (cause) {
       if (run !== this.run) return;
@@ -445,6 +448,7 @@ export class App implements OnInit, OnDestroy {
         previousReason: this.gateReason,
         previousWaitMs: this.gateReason && this.gateSince ? now - this.gateSince : 0,
         motion: quality.motion,
+        rawMotion: quality.rawMotion,
         sharpness: quality.sharpness,
         brightness: quality.brightness,
         requestedAction: this.guidance().action,
@@ -580,6 +584,8 @@ export class App implements OnInit, OnDestroy {
       requestedAction: this.guidance().action,
       sharpness: quality.sharpness,
       motion: quality.motion,
+      rawMotion: quality.rawMotion,
+      requiredStableFrames: CAPTURE_STABLE_FRAMES,
     });
     const still = await this.camera.takeStill();
     if (run !== this.run) return;
