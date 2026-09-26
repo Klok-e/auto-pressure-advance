@@ -67,14 +67,23 @@ def build_agent_request(
         "instructions": (
             "Examine only visible print and geometry. Keep answers brief. "
             "Use null for unreadable values. Ask for at most one camera action. "
-            "Do not invent labels or measurements. " + _INSTRUCTIONS[phase]
+            "Do not invent labels or measurements. Use inspect_region once when a closer look or a precise pointer helps. "
+            "Its box is integer coordinates 0..1000 in this photo, ordered left, top, right, bottom. "
+            "The returned rectangle is your pointer, never printed geometry or text. "
+            "Before asking for a closer view, mark the required area if it is visible. "
+            "In metadata, mark the printed settings; in candidate or verify, mark the corners being compared. " + _INSTRUCTIONS[phase]
         ),
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": _QUESTIONS[phase]},
             {"type": "input_image", "image_url": f"data:{mime};base64,{image}", "detail": "original"},
         ]}],
         "reasoning": {"effort": "medium"},
-        "tools": [],
+        "tools": [{"type": "function", "name": "inspect_region", "description": "Mark one region and inspect its native-resolution detail.",
+                   "strict": True, "parameters": _schema({
+                       "box": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 1000}, "minItems": 4, "maxItems": 4},
+                       "label": {"type": "string", "minLength": 1, "maxLength": 80},
+                   })}],
+        "parallel_tool_calls": False,
         "store": True,
         "text": {"format": {"type": "json_schema", "name": f"pa_agent_{phase}", "strict": True, "schema": SCHEMAS[phase]}},
     }
@@ -120,3 +129,16 @@ def validate_agent_response(response: Mapping[str, Any], phase: str) -> list[str
         if rank is not None and not 1 <= rank <= 100:
             errors.append("line rank must be between 1 and 100")
     return errors
+
+
+def build_inspection_continuation(image_path: str | Path, phase: str, previous_response_id: str,
+                                  call_id: str, marked_path: Path, detail_path: Path) -> dict[str, Any]:
+    request = build_agent_request(image_path, phase, previous_response_id)
+    images = []
+    for path in (marked_path, detail_path):
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        images.append({"type": "input_image", "image_url": f"data:image/png;base64,{encoded}", "detail": "original"})
+    request["input"] = [{"type": "function_call_output", "call_id": call_id, "output": [
+        {"type": "input_text", "text": "First: original photo with your rectangle. Second: unmodified native-resolution detail. The rectangle is only a pointer. Now answer the phase question."}, *images]}]
+    request["tools"] = []
+    return request

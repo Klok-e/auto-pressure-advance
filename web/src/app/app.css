@@ -76,6 +76,15 @@ header small {
 .camera-active header small {
   display: none;
 }
+.camera-workspace {
+  display: none;
+}
+.camera-workspace.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
 .stage {
   display: none;
   position: relative;
@@ -114,15 +123,120 @@ video {
   color: #c4f478;
   font-size: 10px;
 }
+.stage.capturing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid #d1ff8e;
+  pointer-events: none;
+}
+.inspection-strip {
+  flex: none;
+  padding: 8px 12px;
+  background: #132125;
+  border-top: 1px solid #334648;
+}
+.inspection-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+.inspection-heading b {
+  color: #c4f478;
+  flex: none;
+}
+.inspection-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c0d0cb;
+}
+.inspection-images {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.inspection-images figure {
+  position: relative;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.inspection-images img {
+  display: block;
+  width: 100%;
+  height: clamp(72px, 14dvh, 116px);
+  object-fit: contain;
+  border-radius: 5px;
+  background: #080e0e;
+}
+.inspection-images figcaption {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  background: #07110ddd;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 9px;
+  color: #d8e6df;
+}
+.detail-arrow {
+  color: #c4f478;
+}
+.inspection-placeholder {
+  padding: 8px 12px;
+  font-size: 12px;
+  background: #132125;
+  color: #bfceca;
+}
 .scan-controls {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 92px;
-  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  padding: 8px 12px max(12px, env(safe-area-inset-bottom));
   background: #101b20;
   border-top: 1px solid #283840;
+}
+.controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+}
+.phase-track {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: #829592;
+  font-size: 10px;
+}
+.phase-track span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.phase-track i {
+  font-style: normal;
+  border: 1px solid #53605d;
+  border-radius: 50%;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+}
+.phase-track .current {
+  color: #efffdf;
+}
+.phase-track .current i {
+  background: #c4f478;
+  border-color: #c4f478;
+  color: #142006;
+}
+.phase-track .passed i {
+  border-color: #84ab57;
+  color: #c4f478;
 }
 .cue {
   display: flex;
@@ -173,6 +287,18 @@ video {
 }
 .processing {
   animation: spin 1.5s linear infinite;
+}
+.ring-track {
+  opacity: 0.2;
+}
+.ring-fill {
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dasharray 0.35s ease;
+}
+.capture-check {
+  stroke: #fff;
+  stroke-width: 7;
 }
 .cue[data-action='closer'] .zoom-arrow {
   transform-origin: center;
@@ -328,10 +454,31 @@ p {
   font-size: 11px;
 }
 @media (orientation: landscape) and (max-height: 500px) {
+  .camera-workspace.active {
+    flex-direction: row;
+  }
+  .inspection-strip {
+    flex: 0 0 240px;
+    padding: 8px;
+    border-top: 0;
+    border-left: 1px solid #334648;
+  }
+  .inspection-heading {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .inspection-images img {
+    height: min(28dvh, 120px);
+  }
   .scan-controls {
-    min-height: 68px;
-    padding-top: 8px;
-    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    padding-top: 5px;
+    padding-bottom: max(5px, env(safe-area-inset-bottom));
+  }
+  .controls-row {
+    min-height: 50px;
+  }
+  .phase-track {
+    margin-bottom: 3px;
   }
   .pictogram,
   .symbol {

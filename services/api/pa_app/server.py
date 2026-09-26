@@ -47,8 +47,9 @@ class CreatedSession(BaseModel):
 
 class GuidanceTarget(BaseModel):
     observation_id: str
-    box: list[float]
-    reason: str | None = None
+    inspection_index: int
+    box: list[int]
+    label: str
 
 
 class Guidance(BaseModel):
@@ -59,6 +60,14 @@ class Guidance(BaseModel):
     ]
     reason: str | None = None
     target: GuidanceTarget | None = None
+    phase: Literal["identify", "metadata", "candidate", "verify"] | None = None
+
+
+class InspectionProgress(BaseModel):
+    phase: Literal["locate", "identify", "metadata", "candidate", "verify"]
+    activity: Literal["analyzing", "inspecting"]
+    target: GuidanceTarget | None = None
+    started_at: float
 
 
 class SessionState(BaseModel):
@@ -80,6 +89,7 @@ class QueuedObservation(BaseModel):
 
 
 class ObservationState(QueuedObservation):
+    progress: InspectionProgress | None = None
     session_id: str
     result: dict[str, Any] | None
     error: dict[str, Any] | None
@@ -204,6 +214,7 @@ def _observation(row: sqlite3.Row, revision: int) -> dict:
         "status": row["status"], "revision": revision,
         "result": json.loads(row["result"]) if row["result"] else None,
         "error": json.loads(row["error"]) if row["error"] else None,
+        "progress": (json.loads(row["result"]) if row["result"] else {}).get("progress"),
     }
 
 
@@ -250,14 +261,24 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
         try:
             from pa_eval.session_engine import analyze_observation
 
+            def progress_callback(partial_result: dict) -> None:
+                with _db() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    active = conn.execute("SELECT status FROM sessions WHERE id=?", (session_id,)).fetchone()
+                    if active is None or active["status"] != "active":
+                        return
+                    conn.execute("UPDATE observations SET result=?,updated_at=? WHERE id=? AND session_id=? AND status='processing'",
+                                 (json.dumps(partial_result), time.time(), observation_id, session_id))
+
             result = await asyncio.get_running_loop().run_in_executor(
                 app.state.executor,
                 partial(analyze_observation, image_path, observation_id, patterns,
-                        DATA_DIR / session_id / "work" / observation_id, _provider(patterns)),
+                        DATA_DIR / session_id / "work" / observation_id, _provider(patterns), progress_callback),
             )
             if not isinstance(result, dict) or not isinstance(result.get("patterns"), list) or not isinstance(result.get("guidance"), dict):
                 raise ValueError("engine returned invalid session state")
             with _db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 session = conn.execute("SELECT status FROM sessions WHERE id=?", (session_id,)).fetchone()
                 if session is None or session["status"] != "active":
                     return
@@ -276,12 +297,13 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
                             "region_index", "matches", "previous_response_id", "provider_status", "usage",
                             "latency_ms", "errors", "attempts", "measurement", "response_path", "crop_path",
                             "error_type", "candidate_pa", "candidate_line_rank", "verified_pa", "verified_line_rank",
-                            "next_phase", "next_view",
+                            "next_phase", "next_view", "target", "http_status",
                         ) if key in item}
                         _event(conn, session_id, str(item.get("event", item.get("type", "engine_event")))[:80], observation_id, **safe)
                 _event(conn, session_id, "observation_complete", observation_id, revision=revision, stage=stage, guidance_action=guidance.get("action"), usage=result.get("usage"))
         except Exception as exc:
             with _db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 session = conn.execute("SELECT status FROM sessions WHERE id=?", (session_id,)).fetchone()
                 if session is None or session["status"] != "active":
                     return
@@ -442,6 +464,24 @@ async def get_observation(session_id: str, observation_id: str, x_session_secret
         if row is None:
             raise HTTPException(404, detail={"code": "observation_not_found"})
         return _observation(row, session["revision"])
+
+
+@app.get("/api/sessions/{session_id}/observations/{observation_id}/inspection/{inspection_index}/{kind}",
+         response_class=Response, responses={200: {"content": {"image/png": {}}}})
+async def get_inspection(session_id: str, observation_id: str, inspection_index: int,
+                         kind: Literal["marked", "detail"], x_session_secret: str | None = Header(default=None)) -> Response:
+    with _db() as conn:
+        _session(conn, session_id, x_session_secret)
+        row = conn.execute("SELECT result FROM observations WHERE id=? AND session_id=?", (observation_id, session_id)).fetchone()
+        result = json.loads(row["result"]) if row and row["result"] else {}
+        if not any(item.get("inspection_index") == inspection_index for item in result.get("inspections", [])):
+            raise HTTPException(404, detail={"code": "inspection_not_found"})
+        root = (DATA_DIR / session_id / "work" / observation_id / "inspections").resolve()
+        path = (root / f"{inspection_index}-{kind}.png").resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise HTTPException(404, detail={"code": "inspection_not_found"})
+        payload = path.read_bytes()
+    return Response(payload, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/sessions/{session_id}/guidance", response_model=GuidanceState)

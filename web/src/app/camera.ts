@@ -1,6 +1,6 @@
 export type Quality = {
   ready: boolean;
-  reason: 'hold_still' | 'improve_lighting' | 'closer' | 'ready';
+  reason: 'hold_still' | 'improve_lighting' | 'focus' | 'ready';
   sharpness: number;
   brightness: number;
   motion: number;
@@ -51,6 +51,10 @@ export class CameraCapture {
     return { width: this.video.videoWidth, height: this.video.videoHeight };
   }
 
+  resetMotion(): void {
+    this.last = undefined;
+  }
+
   sample(): Quality | undefined {
     if (!this.video.videoWidth) return undefined;
     const width = this.canvas.width;
@@ -94,7 +98,7 @@ export class CameraCapture {
         : motionScore > 9
           ? 'hold_still'
           : sharpnessScore < 13
-            ? 'closer'
+            ? 'focus'
             : 'ready';
     return {
       ready: reason === 'ready' && hadLast,
@@ -106,13 +110,26 @@ export class CameraCapture {
     };
   }
 
-  async takeStill(): Promise<{ blob: Blob; method: string; width: number; height: number }> {
+  async takeStill(): Promise<{
+    blob: Blob;
+    method: string;
+    width: number;
+    height: number;
+    fallback?: string;
+  }> {
     if (!this.track) throw new Error('Camera stopped');
     const constructor = (window as Window & { ImageCapture?: PhotoCaptureConstructor })
       .ImageCapture;
+    let fallback = 'photo_api_unavailable';
     if (constructor) {
+      let timeout: number | undefined;
       try {
-        let blob = await new constructor(this.track).takePhoto();
+        let blob = await Promise.race([
+          new constructor(this.track).takePhoto(),
+          new Promise<never>((_, reject) => {
+            timeout = window.setTimeout(() => reject(new Error('photo_timeout')), 5000);
+          }),
+        ]);
         const bitmap = await createImageBitmap(blob);
         const dimensions = { width: bitmap.width, height: bitmap.height };
         if (
@@ -133,10 +150,16 @@ export class CameraCapture {
         }
         bitmap.close();
         return { blob, method: 'image_capture', ...dimensions };
-      } catch {
-        /* camera-specific takePhoto failures fall back to the active video frame */
+      } catch (error) {
+        fallback =
+          error instanceof Error && error.message === 'photo_timeout'
+            ? 'photo_timeout'
+            : 'photo_failed';
+      } finally {
+        window.clearTimeout(timeout);
       }
     }
+    if (!this.track || !this.video.videoWidth) throw new Error('Camera stopped');
     const canvas = document.createElement('canvas');
     canvas.width = this.video.videoWidth;
     canvas.height = this.video.videoHeight;
@@ -148,7 +171,7 @@ export class CameraCapture {
         0.94,
       ),
     );
-    return { blob, method: 'video_frame', width: canvas.width, height: canvas.height };
+    return { blob, method: 'video_frame', width: canvas.width, height: canvas.height, fallback };
   }
 
   async torch(enabled: boolean): Promise<boolean> {

@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from openai import APIConnectionError, APIStatusError, OpenAI, OpenAIError
 
-from .agent_protocol import build_agent_request
+from .agent_protocol import build_agent_request, build_inspection_continuation
 from .protocol import ENDPOINT, build_request
 
 
@@ -79,6 +79,9 @@ class RecordedProvider:
         request = build_agent_request(image_path, phase, previous_response_id)
         return self._next(request)
 
+    def continue_inspection(self, image_path, phase, previous_response_id, call_id, marked_path, detail_path):
+        return self._next(build_inspection_continuation(image_path, phase, previous_response_id, call_id, marked_path, detail_path))
+
     def _next(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._index >= len(self._responses):
             raise ProviderError("recorded responses exhausted")
@@ -116,6 +119,9 @@ class LiveProvider:
                       previous_response_id: str | None = None) -> dict[str, Any]:
         request = build_agent_request(image_path, phase, previous_response_id)
         return self._send(request)
+
+    def continue_inspection(self, image_path, phase, previous_response_id, call_id, marked_path, detail_path):
+        return self._send(build_inspection_continuation(image_path, phase, previous_response_id, call_id, marked_path, detail_path))
 
     def _send(self, request: Mapping[str, Any]) -> dict[str, Any]:
         start = time.monotonic()

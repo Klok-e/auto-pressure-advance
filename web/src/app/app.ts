@@ -1,6 +1,22 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, OnDestroy, OnInit, ViewChild, signal } from '@angular/core';
-import { Api, Guidance, GuidanceAction, Results, Session } from './api';
+import {
+  Component,
+  computed,
+  ElementRef,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  signal,
+} from '@angular/core';
+import {
+  Api,
+  Guidance,
+  GuidanceAction,
+  GuidanceTarget,
+  InspectionProgress,
+  Results,
+  Session,
+} from './api';
 import { CameraCapture, fingerprintDistance, Quality } from './camera';
 import { Diagnostics } from './diagnostics';
 import {
@@ -14,7 +30,17 @@ import {
   saveStill,
 } from './storage';
 
-const cues: Record<GuidanceAction, { icon: string; label: string }> = {
+type VisualAction = GuidanceAction | 'change_angle' | 'focus' | 'brace';
+type Activity =
+  'framing' | 'steadying' | 'capturing' | 'uploading' | 'queued' | 'analyzing' | 'retrying';
+const phaseLabels: Record<string, string> = {
+  locate: 'Finding the pattern',
+  identify: 'Recognizing the pattern',
+  metadata: 'Reading printed settings',
+  candidate: 'Comparing the corners',
+  verify: 'Checking a second view',
+};
+const cues: Record<VisualAction, { icon: string; label: string }> = {
   move_left: { icon: '←', label: 'Move left' },
   move_right: { icon: '→', label: 'Move right' },
   move_up: { icon: '↑', label: 'Move up' },
@@ -30,6 +56,9 @@ const cues: Record<GuidanceAction, { icon: string; label: string }> = {
   complete: { icon: '✓', label: 'Scan complete' },
   inconclusive: { icon: '?', label: 'More detail needed' },
   stop: { icon: '■', label: 'Scan stopped' },
+  change_angle: { icon: '↷', label: 'Show another angle' },
+  focus: { icon: '◎', label: 'Let the camera focus' },
+  brace: { icon: '⊥', label: 'Brace your phone' },
 };
 
 @Component({
@@ -44,7 +73,7 @@ export class App implements OnInit, OnDestroy {
     'welcome',
   );
   readonly cue = signal(cues.show_full_pattern);
-  readonly visualAction = signal<GuidanceAction>('show_full_pattern');
+  readonly visualAction = signal<VisualAction>('show_full_pattern');
   readonly guidance = signal<Guidance>({ action: 'show_full_pattern' });
   readonly results = signal<Results>({ revision: 0, rows: [], unresolved: [], conflicts: [] });
   readonly error = signal('');
@@ -52,6 +81,49 @@ export class App implements OnInit, OnDestroy {
   readonly hasSavedSession = signal(false);
   readonly copied = signal(false);
   readonly expandedDetails = signal(false);
+  readonly activity = signal<Activity>('framing');
+  readonly steadyProgress = signal(0);
+  readonly elapsed = signal(0);
+  readonly inspectionPhase = signal('identify');
+  readonly inspectingDetail = signal(false);
+  readonly inspection = signal<
+    { marked: string; detail: string; target: GuidanceTarget } | undefined
+  >(undefined);
+  readonly inspectionLoading = signal(false);
+  readonly inspectionError = signal(false);
+  readonly stageIndex = computed(() =>
+    ['identify', 'metadata', 'candidate', 'verify'].indexOf(this.inspectionPhase()),
+  );
+  readonly statusTitle = computed(() => {
+    switch (this.activity()) {
+      case 'steadying':
+        return 'Steady for photo';
+      case 'capturing':
+        return 'Taking photo…';
+      case 'uploading':
+        return 'Photo saved · sending';
+      case 'queued':
+        return 'Photo queued';
+      case 'analyzing':
+        return this.inspectingDetail()
+          ? 'Inspecting marked area'
+          : (phaseLabels[this.inspectionPhase()] ?? 'Inspecting photo');
+      case 'retrying':
+        return navigator.onLine ? 'Reconnecting…' : 'Photo saved · offline';
+      default:
+        return this.visualAction() === 'closer' && this.inspection()
+          ? 'Closer to marked area'
+          : this.cue().label;
+    }
+  });
+  readonly statusDetail = computed(() => {
+    if (this.activity() === 'analyzing' || this.activity() === 'queued')
+      return `Photo captured · ${this.elapsed()}s${this.elapsed() >= 15 ? ' · still working' : ''}`;
+    if (this.activity() === 'capturing') return 'Automatic photo · no tap needed';
+    if (this.activity() === 'uploading') return `${this.elapsed()}s · you can relax your hands`;
+    if (this.activity() === 'steadying') return 'Captures automatically when the ring fills';
+    return this.progress();
+  });
   private api = new Api();
   private log = new Diagnostics();
   private camera?: CameraCapture;
@@ -68,6 +140,12 @@ export class App implements OnInit, OnDestroy {
   private torchAttempted = false;
   private torchAt?: number;
   private torchBaseline?: number;
+  private activityAt = Date.now();
+  private gateReason = '';
+  private gateSince = 0;
+  private inspectionKey = '';
+  private inspectionRetryAt = 0;
+  private run = 0;
 
   ngOnInit(): void {
     this.session = savedSession();
@@ -83,6 +161,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopCamera();
+    this.clearInspection();
     window.removeEventListener('offline', this.onOffline);
     window.removeEventListener('online', this.onOnline);
   }
@@ -97,6 +176,12 @@ export class App implements OnInit, OnDestroy {
   };
 
   async start(resume = false): Promise<void> {
+    this.stopCamera();
+    this.clearInspection();
+    this.stableFrames = 0;
+    this.steadyProgress.set(0);
+    this.gateReason = '';
+    this.setActivity('framing');
     this.phase.set('starting');
     this.error.set('');
     this.log.log('camera_preflight', {
@@ -126,6 +211,9 @@ export class App implements OnInit, OnDestroy {
         this.lastFingerprint = undefined;
         this.captureCount = 0;
         this.scanNextSince = undefined;
+        this.guidance.set({ action: 'show_full_pattern' });
+        this.inspectionPhase.set('identify');
+        this.setCue('show_full_pattern');
         this.session = await this.api.create();
         saveSession(this.session);
         this.log.log('session_created', {
@@ -146,7 +234,10 @@ export class App implements OnInit, OnDestroy {
       await this.openCamera();
       this.phase.set('scanning');
       this.progress.set('Looking for a pattern');
-      this.timer = window.setInterval(() => void this.tick(), 450);
+      this.timer = window.setInterval(() => {
+        this.elapsed.set(Math.max(0, Math.floor((Date.now() - this.activityAt) / 1000)));
+        void this.tick();
+      }, 450);
       await this.refresh();
     } catch (cause) {
       this.fail(
@@ -177,6 +268,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   private stopCamera(): void {
+    this.run++;
     if (this.timer) window.clearInterval(this.timer);
     this.timer = undefined;
     this.camera?.stop();
@@ -194,7 +286,10 @@ export class App implements OnInit, OnDestroy {
   private setGuidance(guidance?: Guidance): void {
     if (!guidance) return;
     this.guidance.set(guidance);
-    const action = [
+    if (guidance.phase) this.inspectionPhase.set(guidance.phase);
+    this.progress.set(guidance.reason || 'Fit one whole V-shaped print in the camera');
+    void this.showInspection(guidance.target);
+    const action: VisualAction = [
       'move_left',
       'move_right',
       'move_up',
@@ -203,7 +298,9 @@ export class App implements OnInit, OnDestroy {
       'tilt_right',
     ].includes(guidance.action)
       ? 'show_full_pattern'
-      : guidance.action;
+      : guidance.phase === 'verify' && guidance.action === 'show_full_pattern'
+        ? 'change_angle'
+        : guidance.action;
     this.setCue(action);
     if (guidance.action === 'scan_next' && !this.scanNextSince) this.scanNextSince = Date.now();
     else if (guidance.action !== 'scan_next') this.scanNextSince = undefined;
@@ -225,9 +322,6 @@ export class App implements OnInit, OnDestroy {
       this.session.revision = state.revision;
       saveSession(this.session);
       this.setGuidance(state.guidance);
-      this.progress.set(
-        `${state.observation_count} still${state.observation_count === 1 ? '' : 's'} analyzed`,
-      );
     }
     this.results.set(result);
     this.log.log('session_refresh', {
@@ -248,6 +342,7 @@ export class App implements OnInit, OnDestroy {
 
   private async tick(): Promise<void> {
     if (this.tickBusy || !this.session || !this.camera || this.phase() === 'results') return;
+    const run = this.run;
     this.tickBusy = true;
     try {
       if (this.activeObservation) {
@@ -259,10 +354,13 @@ export class App implements OnInit, OnDestroy {
         return;
       }
       const pending = await pendingStills();
+      if (run !== this.run) return;
       if (pending.length) {
         await this.upload(pending[0].key, pending[0].blob);
         return;
       }
+      this.phase.set('scanning');
+      if (this.inspectionError()) void this.showInspection(this.guidance().target);
       if (this.scanNextSince && Date.now() - this.scanNextSince > 20_000) {
         await this.finishScan('scan_next_timeout');
         return;
@@ -307,7 +405,8 @@ export class App implements OnInit, OnDestroy {
       }
       if (!quality.ready) {
         this.stableFrames = 0;
-        this.showLocalCue(quality.reason === 'ready' ? 'hold_still' : quality.reason);
+        this.steadyProgress.set(0);
+        this.waitForView(quality.reason, quality);
         return;
       }
       if (
@@ -315,15 +414,21 @@ export class App implements OnInit, OnDestroy {
         fingerprintDistance(quality.fingerprint, this.lastFingerprint) < 7
       ) {
         this.stableFrames = 0;
-        this.showLocalCue(this.guidance().action === 'scan_next' ? 'show_full_pattern' : 'closer');
+        this.steadyProgress.set(0);
+        this.waitForView('unchanged', quality);
         return;
       }
+      this.gateReason = '';
       this.stableFrames++;
-      this.showLocalCue('hold_still');
+      this.steadyProgress.set(Math.min(1, this.stableFrames / 3));
+      this.setActivity('steadying');
+      this.setCue('hold_still');
       if (this.stableFrames < 3 || Date.now() - this.lastCaptureAt < 3000) return;
       await this.capture(quality);
     } catch (cause) {
+      if (run !== this.run) return;
       this.log.log('tick_failed', { cause: String(cause) });
+      this.setActivity('retrying');
       this.progress.set(
         navigator.onLine ? 'Waiting for server · retrying' : 'Offline · waiting to upload',
       );
@@ -332,32 +437,162 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  private showLocalCue(action: GuidanceAction): void {
-    const requested = this.guidance().action;
-    this.setCue(
-      action === 'hold_still' && ['closer', 'farther', 'scan_next'].includes(requested)
-        ? requested
-        : action,
-    );
+  private waitForView(reason: Quality['reason'] | 'unchanged', quality: Quality): void {
+    if (this.gateReason !== reason) {
+      const now = Date.now();
+      this.log.log('capture_wait', {
+        reason,
+        previousReason: this.gateReason,
+        previousWaitMs: this.gateReason && this.gateSince ? now - this.gateSince : 0,
+        motion: quality.motion,
+        sharpness: quality.sharpness,
+        brightness: quality.brightness,
+        requestedAction: this.guidance().action,
+        requestedReason: this.guidance().reason,
+      });
+      this.gateReason = reason;
+      this.gateSince = now;
+    }
+    const waiting = Date.now() - this.gateSince;
+    this.setActivity('framing');
+    if (reason === 'unchanged') {
+      const requested = this.guidance();
+      this.setCue(
+        requested.phase === 'verify' || requested.action === 'hold_still'
+          ? 'change_angle'
+          : requested.action,
+      );
+      this.progress.set(requested.reason || 'Show a slightly different view of this print');
+    } else if (reason === 'focus') {
+      this.setCue('focus');
+      this.progress.set(
+        waiting > 3000
+          ? 'Still blurry · back up a little to help focus'
+          : 'Pause briefly while the camera focuses',
+      );
+    } else if (reason === 'improve_lighting') {
+      this.setCue('improve_lighting');
+      this.progress.set(
+        quality.brightness > 220 ? 'Tilt away from glare' : 'Bring the print into even light',
+      );
+    } else {
+      this.setCue(waiting > 4000 ? 'brace' : 'hold_still');
+      this.progress.set(
+        waiting > 4000
+          ? 'Rest your elbows or support the phone'
+          : 'Waiting for a sharp, steady moment',
+      );
+    }
   }
 
-  private setCue(action: GuidanceAction): void {
+  private setCue(action: VisualAction): void {
     this.visualAction.set(action);
     this.cue.set(cues[action]);
   }
 
+  private setActivity(activity: Activity, startedAt?: number): void {
+    if (this.activity() === activity && (startedAt === undefined || this.activityAt === startedAt))
+      return;
+    this.log.log('camera_activity', {
+      from: this.activity(),
+      to: activity,
+      elapsedMs: Date.now() - this.activityAt,
+    });
+    this.activity.set(activity);
+    this.activityAt = startedAt ?? Date.now();
+    this.elapsed.set(Math.max(0, Math.floor((Date.now() - this.activityAt) / 1000)));
+  }
+
+  private showAnalysis(progress: InspectionProgress): void {
+    if (
+      this.inspectionPhase() !== progress.phase ||
+      this.inspectingDetail() !== (progress.activity === 'inspecting')
+    ) {
+      this.log.log('analysis_progress', {
+        phase: progress.phase,
+        activity: progress.activity,
+        target: progress.target,
+      });
+    }
+    this.inspectionPhase.set(progress.phase);
+    this.inspectingDetail.set(progress.activity === 'inspecting');
+    this.setActivity('analyzing', progress.started_at * 1000);
+    void this.showInspection(progress.target);
+  }
+
+  private clearInspection(): void {
+    this.inspectionKey = '';
+    this.inspectionRetryAt = 0;
+    const previous = this.inspection();
+    if (previous) {
+      URL.revokeObjectURL(previous.marked);
+      URL.revokeObjectURL(previous.detail);
+    }
+    this.inspection.set(undefined);
+    this.inspectionLoading.set(false);
+    this.inspectionError.set(false);
+  }
+
+  private async showInspection(target?: GuidanceTarget | null): Promise<void> {
+    if (!target || !this.session) {
+      this.clearInspection();
+      return;
+    }
+    const key = `${this.session.id}/${target.observation_id}/${target.inspection_index}`;
+    if (
+      this.inspectionKey === key &&
+      (this.inspectionLoading() || this.inspection() || Date.now() < this.inspectionRetryAt)
+    )
+      return;
+    this.clearInspection();
+    this.inspectionKey = key;
+    this.inspectionLoading.set(true);
+    try {
+      const [marked, detail] = await Promise.all([
+        this.api.inspection(this.session, target, 'marked'),
+        this.api.inspection(this.session, target, 'detail'),
+      ]);
+      if (this.inspectionKey !== key) return;
+      this.inspection.set({
+        marked: URL.createObjectURL(marked),
+        detail: URL.createObjectURL(detail),
+        target,
+      });
+      this.log.log('inspection_displayed', { ...target });
+    } catch (cause) {
+      if (this.inspectionKey !== key) return;
+      this.inspectionRetryAt = Date.now() + 5000;
+      this.inspectionError.set(true);
+      this.log.log('inspection_display_failed', { cause: String(cause), ...target });
+    } finally {
+      if (this.inspectionKey === key) this.inspectionLoading.set(false);
+    }
+  }
+
   private async capture(quality: Quality): Promise<void> {
     if (!this.session || !this.camera) return;
+    const run = this.run;
+    this.phase.set('processing');
+    this.setActivity('capturing');
     this.stableFrames = 0;
     this.lastCaptureAt = Date.now();
+    this.log.log('capture_started', {
+      requestedAction: this.guidance().action,
+      sharpness: quality.sharpness,
+      motion: quality.motion,
+    });
     const still = await this.camera.takeStill();
+    if (run !== this.run) return;
     const key = crypto.randomUUID();
     await saveStill({ key, blob: still.blob, createdAt: Date.now() });
+    if (run !== this.run) return;
     this.captureCount++;
     this.lastFingerprint = quality.fingerprint;
     this.log.log('still_selected', {
       key,
       method: still.method,
+      fallback: still.fallback,
+      captureMs: Date.now() - this.lastCaptureAt,
       width: still.width,
       height: still.height,
       bytes: still.blob.size,
@@ -368,27 +603,45 @@ export class App implements OnInit, OnDestroy {
   }
 
   private async upload(key: string, blob: Blob): Promise<void> {
-    if (!this.session || !navigator.onLine) return;
+    if (!this.session) return;
     this.phase.set('processing');
-    this.progress.set('Analyzing this view');
+    if (!navigator.onLine) {
+      this.setActivity('retrying');
+      this.progress.set('Will send automatically when connected');
+      return;
+    }
+    const run = this.run;
+    this.setActivity('uploading');
+    const startedAt = Date.now();
     const result = await this.api.upload(this.session, blob, key);
+    if (run !== this.run) return;
     this.activeObservation = result.observation_id;
     saveActiveObservation(this.activeObservation);
     await removeStill(key);
     this.session.revision = Math.max(this.session.revision, result.revision);
     saveSession(this.session);
     this.log.log('still_uploaded', {
+      uploadMs: Date.now() - startedAt,
       key,
       observationId: this.activeObservation,
       status: result.status,
       revision: result.revision,
     });
+    this.setActivity('queued');
+    this.clearInspection();
   }
 
   private async pollObservation(): Promise<void> {
     if (!this.session || !this.activeObservation) return;
+    const run = this.run;
     const observation = await this.api.observation(this.session, this.activeObservation);
-    if (observation.status === 'queued' || observation.status === 'processing') return;
+    if (run !== this.run) return;
+    if (observation.status === 'queued' || observation.status === 'processing') {
+      this.phase.set('processing');
+      if (observation.progress) this.showAnalysis(observation.progress);
+      else this.setActivity(observation.status === 'queued' ? 'queued' : 'analyzing');
+      return;
+    }
     this.log.log('observation_finished', {
       observationId: this.activeObservation,
       status: observation.status,
@@ -398,6 +651,12 @@ export class App implements OnInit, OnDestroy {
     this.activeObservation = undefined;
     saveActiveObservation();
     await this.refresh();
+    if (run !== this.run) return;
+    this.camera?.resetMotion();
+    this.stableFrames = 0;
+    this.steadyProgress.set(0);
+    this.gateReason = '';
+    this.setActivity('framing');
     this.phase.set('scanning');
     if (observation.status === 'failed')
       this.progress.set('Analysis could not finish · show another view');
@@ -447,6 +706,7 @@ export class App implements OnInit, OnDestroy {
   }
   async deleteSession(): Promise<void> {
     this.stopCamera();
+    this.clearInspection();
     try {
       if (this.session) await this.api.delete(this.session);
     } catch (cause) {

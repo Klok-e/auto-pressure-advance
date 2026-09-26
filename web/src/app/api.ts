@@ -3,6 +3,8 @@ import type { components } from './api.generated';
 type Schema = components['schemas'];
 export type GuidanceAction = Schema['Guidance']['action'];
 export type Guidance = Schema['Guidance'];
+export type GuidanceTarget = Schema['GuidanceTarget'];
+export type InspectionProgress = Schema['InspectionProgress'];
 export type Session = Schema['CreatedSession'];
 export type SessionState = Schema['SessionState'];
 export type Observation = Schema['ObservationState'] | Schema['QueuedObservation'];
@@ -107,6 +109,23 @@ export class Api {
       {},
       session.access_secret,
     );
+  }
+  async inspection(
+    session: Session,
+    target: GuidanceTarget,
+    kind: 'marked' | 'detail',
+  ): Promise<Blob> {
+    const response = await fetch(
+      `${this.base}/api/sessions/${encodeURIComponent(session.id)}/observations/${encodeURIComponent(target.observation_id)}/inspection/${target.inspection_index}/${kind}`,
+      {
+        headers: { 'X-Session-Secret': session.access_secret },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok)
+      throw new ApiError(response.status, 'inspection_unavailable', 'Marked photo unavailable');
+    return response.blob();
   }
   upload(session: Session, image: Blob, key: string): Promise<Schema['QueuedObservation']> {
     return this.request(

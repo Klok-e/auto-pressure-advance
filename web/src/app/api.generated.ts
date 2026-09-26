@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/observations/{observation_id}/inspection/{inspection_index}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Inspection */
+        get: operations["get_inspection_api_sessions__session_id__observations__observation_id__inspection__inspection_index___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/guidance": {
         parameters: {
             query?: never;
@@ -227,6 +244,8 @@ export interface components {
             /** Reason */
             reason?: string | null;
             target?: components["schemas"]["GuidanceTarget"] | null;
+            /** Phase */
+            phase?: ("identify" | "metadata" | "candidate" | "verify") | null;
         };
         /** GuidanceState */
         GuidanceState: {
@@ -238,15 +257,33 @@ export interface components {
         GuidanceTarget: {
             /** Observation Id */
             observation_id: string;
+            /** Inspection Index */
+            inspection_index: number;
             /** Box */
             box: number[];
-            /** Reason */
-            reason?: string | null;
+            /** Label */
+            label: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InspectionProgress */
+        InspectionProgress: {
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "locate" | "identify" | "metadata" | "candidate" | "verify";
+            /**
+             * Activity
+             * @enum {string}
+             */
+            activity: "analyzing" | "inspecting";
+            target?: components["schemas"]["GuidanceTarget"] | null;
+            /** Started At */
+            started_at: number;
         };
         /** ObservationState */
         ObservationState: {
@@ -256,6 +293,7 @@ export interface components {
             revision: number;
             /** Status */
             status: string;
+            progress?: components["schemas"]["InspectionProgress"] | null;
             /** Session Id */
             session_id: string;
             /** Result */
@@ -493,6 +531,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_inspection_api_sessions__session_id__observations__observation_id__inspection__inspection_index___kind__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-session-secret"?: string | null;
+            };
+            path: {
+                session_id: string;
+                observation_id: string;
+                inspection_index: number;
+                kind: "marked" | "detail";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
                 };
             };
             /** @description Validation Error */

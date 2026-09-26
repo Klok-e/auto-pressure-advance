@@ -7,71 +7,152 @@
       ⇩
     </button>
   </header>
-  <section class="stage" [class.live]="cameraActive" [attr.aria-hidden]="!cameraActive">
-    <video #preview autoplay playsinline [muted]="true" aria-label="Rear camera preview"></video>
-    @if (cameraActive) {
-      <div class="live-badge"><span aria-hidden="true">●</span> Live</div>
+  <div class="camera-workspace" [class.active]="cameraActive">
+    <section
+      class="stage"
+      [class.live]="cameraActive"
+      [class.capturing]="activity() === 'capturing'"
+      [attr.aria-hidden]="!cameraActive"
+    >
+      <video #preview autoplay playsinline [muted]="true" aria-label="Rear camera preview"></video>
+      @if (cameraActive) {
+        <div class="live-badge"><span aria-hidden="true">●</span> Live camera</div>
+      }
+    </section>
+    @if (cameraActive && inspection(); as view) {
+      <aside class="inspection-strip" aria-label="Luna's marked photo">
+        <div class="inspection-heading">
+          <b>{{ phase() === 'processing' ? 'Luna is inspecting' : 'Last inspected' }}</b
+          ><span>{{ view.target.label }}</span>
+        </div>
+        <div class="inspection-images">
+          <figure>
+            <img [src]="view.marked" alt="Saved photo with Luna's inspection area outlined" />
+            <figcaption>Saved photo</figcaption>
+          </figure>
+          <span class="detail-arrow" aria-hidden="true">→</span>
+          <figure>
+            <img [src]="view.detail" [alt]="'Detail: ' + view.target.label" />
+            <figcaption>Marked detail</figcaption>
+          </figure>
+        </div>
+      </aside>
+    } @else if (cameraActive && (inspectionLoading() || inspectionError())) {
+      <div class="inspection-placeholder" role="status">
+        {{
+          inspectionError() ? 'Marked photo unavailable · retrying' : 'Loading Luna’s marked photo…'
+        }}
+      </div>
     }
-  </section>
+  </div>
   @if (cameraActive) {
     <footer class="scan-controls">
-      <div
-        class="cue"
-        [attr.data-action]="phase() === 'processing' ? 'processing' : visualAction()"
-      >
-        @if (phase() === 'processing') {
-          <svg class="pictogram processing" viewBox="0 0 120 120" aria-hidden="true">
-            <circle cx="60" cy="60" r="36" />
-            <path d="M60 24a36 36 0 0 1 36 36" />
-          </svg>
-        } @else if (visualAction() === 'closer' || visualAction() === 'farther') {
-          <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
-            <rect x="41" y="39" width="38" height="42" rx="4" />
-            <path d="M49 50h22M49 58h22M49 66h22" />
-            <path
-              class="zoom-arrow"
-              d="M60 9v21m-8-8 8 8 8-8M60 111V90m-8 8 8-8 8 8M9 60h21m-8-8 8 8-8 8M111 60H90m8-8-8 8 8 8"
-            />
-          </svg>
-        } @else if (visualAction() === 'show_full_pattern') {
-          <svg class="pictogram full" viewBox="0 0 120 120" aria-hidden="true">
-            <rect x="28" y="27" width="64" height="66" rx="4" />
-            <path d="M42 44h36M42 53h36M42 62h36M42 71h36" />
-            <path
-              class="expand-arrow"
-              d="M31 17 15 1m0 11V1h11M89 17l16-16m-11 0h11v11M31 103l-16 16m0-11v11h11M89 103l16 16m-11 0h11v-11"
-            />
-          </svg>
-        } @else if (visualAction() === 'hold_still') {
-          <svg class="pictogram hold" viewBox="0 0 120 120" aria-hidden="true">
-            <circle cx="60" cy="60" r="27" />
-            <circle cx="60" cy="60" r="12" />
-            <path d="M60 6v20M60 94v20M6 60h20M94 60h20" />
-          </svg>
-        } @else if (visualAction() === 'improve_lighting') {
-          <svg class="pictogram light" viewBox="0 0 120 120" aria-hidden="true">
-            <circle cx="60" cy="60" r="25" />
-            <path
-              d="M60 2v18M60 100v18M2 60h18M100 60h18M19 19l14 14m54 54 14 14M101 19 87 33M33 87l-14 14"
-            />
-          </svg>
-        } @else if (visualAction() === 'scan_next') {
-          <svg class="pictogram next" viewBox="0 0 120 120" aria-hidden="true">
-            <rect x="11" y="34" width="37" height="51" rx="4" />
-            <rect x="72" y="34" width="37" height="51" rx="4" />
-            <path d="M21 47h17M21 55h17M82 47h17M82 55h17M42 101h40m-10-10 10 10-10 10" />
-          </svg>
-        } @else {
-          <div class="symbol" aria-hidden="true">{{ cue().icon }}</div>
+      <div class="phase-track" aria-label="Inspection steps">
+        @for (step of ['Pattern', 'Print labels', 'Corners', 'Second view']; track $index) {
+          <span [class.current]="stageIndex() === $index" [class.passed]="stageIndex() > $index"
+            ><i aria-hidden="true">{{ stageIndex() > $index ? '✓' : $index + 1 }}</i
+            >{{ step }}</span
+          >
         }
-        <div class="cue-copy" role="status" aria-live="polite" aria-atomic="true">
-          <b>{{ phase() === 'processing' ? 'Analyzing…' : cue().label }}</b>
-          <small>{{ phase() === 'processing' ? 'Keep the pattern in view' : progress() }}</small>
-        </div>
       </div>
-      <button class="stop-scan" (click)="stop()" aria-label="Stop scan">
-        <span aria-hidden="true">■</span> Stop
-      </button>
+      <div class="controls-row">
+        <div
+          class="cue"
+          [attr.data-action]="phase() === 'processing' ? 'processing' : visualAction()"
+        >
+          @if (activity() === 'steadying') {
+            <svg class="pictogram stability" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="ring-track" cx="60" cy="60" r="47" />
+              <circle
+                class="ring-fill"
+                cx="60"
+                cy="60"
+                r="47"
+                pathLength="100"
+                [attr.stroke-dasharray]="steadyProgress() * 100 + ' 100'"
+              />
+              <path d="M40 46h9l5-7h12l5 7h9v33H40z" />
+              <circle cx="60" cy="62" r="9" />
+            </svg>
+          } @else if (activity() === 'capturing' || activity() === 'uploading') {
+            <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
+              <path d="M18 37h23l7-12h24l7 12h23v61H18z" />
+              <circle cx="60" cy="66" r="19" />
+              @if (activity() === 'uploading') {
+                <path class="capture-check" d="m43 66 12 12 23-26" />
+              }
+            </svg>
+          } @else if (phase() === 'processing') {
+            <svg class="pictogram processing" viewBox="0 0 120 120" aria-hidden="true">
+              <circle cx="60" cy="60" r="36" />
+              <path d="M60 24a36 36 0 0 1 36 36" />
+            </svg>
+          } @else if (visualAction() === 'closer' || visualAction() === 'farther') {
+            <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
+              <rect x="41" y="39" width="38" height="42" rx="4" />
+              <path d="m49 48 11 10 11-10m-22 9 11 10 11-10m-22 9 11 10 11-10" />
+              <path
+                class="zoom-arrow"
+                d="M60 9v21m-8-8 8 8 8-8M60 111V90m-8 8 8-8 8 8M9 60h21m-8-8 8 8-8 8M111 60H90m8-8-8 8 8 8"
+              />
+            </svg>
+          } @else if (visualAction() === 'show_full_pattern') {
+            <svg class="pictogram full" viewBox="0 0 120 120" aria-hidden="true">
+              <rect x="28" y="27" width="64" height="66" rx="4" />
+              <path d="m38 40 22 20 22-20m-44 12 22 20 22-20m-44 12 22 20 22-20" />
+              <path
+                class="expand-arrow"
+                d="M31 17 15 1m0 11V1h11M89 17l16-16m-11 0h11v11M31 103l-16 16m0-11v11h11M89 103l16 16m-11 0h11v-11"
+              />
+            </svg>
+          } @else if (visualAction() === 'change_angle') {
+            <svg class="pictogram angle" viewBox="0 0 120 120" aria-hidden="true">
+              <path
+                d="m20 88 40-14 40 14-40 20zM34 59V15h24v44zM75 54l17-41 22 9-17 41zM25 69Q56 36 82 66m-15-3 15 3-1-15"
+              />
+            </svg>
+          } @else if (visualAction() === 'brace') {
+            <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
+              <rect x="38" y="12" width="44" height="66" rx="5" />
+              <path d="M25 61v26h70V61M60 88v19M14 108h92M53 66h14" />
+            </svg>
+          } @else if (visualAction() === 'focus') {
+            <svg class="pictogram" viewBox="0 0 120 120" aria-hidden="true">
+              <path
+                d="M14 41V14h27m38 0h27v27M14 79v27h27m38 0h27V79M29 43l31 29 31-29M29 58l31 29 31-29"
+              />
+            </svg>
+          } @else if (visualAction() === 'hold_still') {
+            <svg class="pictogram hold" viewBox="0 0 120 120" aria-hidden="true">
+              <circle cx="60" cy="60" r="27" />
+              <circle cx="60" cy="60" r="12" />
+              <path d="M60 6v20M60 94v20M6 60h20M94 60h20" />
+            </svg>
+          } @else if (visualAction() === 'improve_lighting') {
+            <svg class="pictogram light" viewBox="0 0 120 120" aria-hidden="true">
+              <circle cx="60" cy="60" r="25" />
+              <path
+                d="M60 2v18M60 100v18M2 60h18M100 60h18M19 19l14 14m54 54 14 14M101 19 87 33M33 87l-14 14"
+              />
+            </svg>
+          } @else if (visualAction() === 'scan_next') {
+            <svg class="pictogram next" viewBox="0 0 120 120" aria-hidden="true">
+              <rect x="11" y="34" width="37" height="51" rx="4" />
+              <rect x="72" y="34" width="37" height="51" rx="4" />
+              <path d="M21 47h17M21 55h17M82 47h17M82 55h17M42 101h40m-10-10 10 10-10 10" />
+            </svg>
+          } @else {
+            <div class="symbol" aria-hidden="true">{{ cue().icon }}</div>
+          }
+          <div class="cue-copy">
+            <b role="status" aria-live="polite">{{ statusTitle() }}</b>
+            <small>{{ statusDetail() }}</small>
+          </div>
+        </div>
+        <button class="stop-scan" (click)="stop()" aria-label="Stop scan">
+          <span aria-hidden="true">■</span> Stop
+        </button>
+      </div>
     </footer>
   }
   @if (phase() === 'welcome' || phase() === 'starting') {
