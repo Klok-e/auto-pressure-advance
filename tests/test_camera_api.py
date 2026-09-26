@@ -22,8 +22,8 @@ def test_session_upload_progress_diagnostics_and_deletion(tmp_path, monkeypatch)
     calls = []
 
     class RecordedBoundary:
-        def request_agent(self, image_path, phase, previous_response_id=None):
-            request = build_agent_request(image_path, phase, previous_response_id)
+        def request_agent(self, image_path, phase, previous_response_id=None, metadata=None):
+            request = build_agent_request(image_path, phase, previous_response_id, metadata)
             calls.append((phase, request))
             responses = [
                 {"status": "supported", "next_view": None, "reason": "Herringbone pattern visible"},
@@ -95,6 +95,9 @@ def test_session_upload_progress_diagnostics_and_deletion(tmp_path, monkeypatch)
                 assert rows == ([] if index < 3 else [{"pa": "0.05", "flow": "15.1", "acceleration": "4000", "pattern_id": session["patterns"][0]["id"]}])
             assert [phase for phase, _ in calls] == ["identify", "metadata", "candidate", "verify", "candidate", "verify"]
             assert "previous_response_id" not in calls[3][1] and "previous_response_id" not in calls[5][1]
+            assert '"flow": 15.1' in calls[3][1]["instructions"]
+            assert '"acceleration": 4000' in calls[3][1]["instructions"]
+            assert '0.05' not in calls[3][1]["instructions"]
             assert (await client.delete(f"/api/sessions/{session_id}", headers=headers)).json() == {"deleted": True}
             assert not saved_path.exists()
             assert (await client.get(f"/api/sessions/{session_id}", headers=headers)).status_code == 404
@@ -116,7 +119,7 @@ def test_inspection_images_progress_and_authenticated_access(tmp_path, monkeypat
     fixture.write_text(json.dumps([
         {"id": "mark", "status": "completed", "cost_usd": 0, "output": [
             {"type": "function_call", "call_id": "mark-call", "name": "inspect_region",
-             "arguments": json.dumps({"box": [100, 200, 500, 700], "label": "Printed PA marks"})}]},
+             "arguments": json.dumps({"box": [100, 200, 500, 700], "label": "Printed PA marks", "rotation": 0})}]},
         {"status": "unclear", "next_view": "closer", "reason": "Show the marked PA labels closer."},
     ]))
     continuation_entered, release = threading.Event(), threading.Event()
@@ -158,7 +161,7 @@ def test_inspection_images_progress_and_authenticated_access(tmp_path, monkeypat
             other = (await client.post("/api/sessions")).json()
             assert (await client.get(f"/api/sessions/{other['id']}/observations/{oid}/inspection/0/marked", headers={"X-Session-Secret": other["access_secret"]})).status_code == 404
             rendered = {}
-            for kind, size in (("marked", (100, 80)), ("detail", (40, 40))):
+            for kind, size in (("marked", (100, 80)), ("detail", (160, 160))):
                 response = await client.get(f"{endpoint}/{kind}", headers=headers)
                 assert response.status_code == 200
                 assert response.headers["cache-control"] == "no-store"
@@ -175,14 +178,17 @@ def test_inspection_images_progress_and_authenticated_access(tmp_path, monkeypat
             guidance = (await client.get(base, headers=headers)).json()["guidance"]
             assert guidance["target"] == target and guidance["reason"] == "Show the marked PA labels closer."
             request = requests[0]
-            assert request["previous_response_id"] == "mark" and request["tools"] == []
+            assert request["previous_response_id"] == "mark" and request["tools"]
             output = request["input"][0]
             assert output["type"] == "function_call_output" and output["call_id"] == "mark-call"
-            for part, kind in zip(output["output"][1:], ("marked", "detail")):
-                assert base64.b64decode(part["image_url"].split(",", 1)[1]) == rendered[kind]
+            assert len(output["output"]) == 2
+            assert base64.b64decode(output["output"][1]["image_url"].split(",", 1)[1]) == rendered["detail"]
             logs = list((server.DATA_DIR / session["id"]).rglob("responses/*.json"))
             assert len(logs) == 2
             assert all("data:image" not in path.read_text() for path in logs)
+            image_log = json.loads(next(path for path in logs if path.name.endswith("-2.json")).read_text())["request"]["input"][0]["output"][1]
+            assert image_log["image_role"] == "inspection_detail" and image_log["image_size"] == [160, 160]
+            assert Path(image_log["image_file"]).read_bytes() == rendered["detail"]
     try:
         asyncio.run(exercise())
     finally:
@@ -198,17 +204,87 @@ def test_invalid_inspection_and_continuation_budget(tmp_path, monkeypatch):
     Image.new("RGB", (100, 80), "white").save(photo)
     fixture = tmp_path / "responses.json"
     for index, box in enumerate(([500, 0, 200, 100], [0, 0, 1001, 100], [0, 0, True, 100], [0, 0, 0, 100])):
-        fixture.write_text(json.dumps([{"id": "bad", "cost_usd": 0, "output": [{"type": "function_call", "name": "inspect_region", "call_id": "bad", "arguments": json.dumps({"box": box, "label": "label"})}]}]))
+        fixture.write_text(json.dumps([{"id": "bad", "cost_usd": 0, "output": [{"type": "function_call", "name": "inspect_region", "call_id": "bad", "arguments": json.dumps({"box": box, "label": "label", "rotation": 0})}]}]))
         result = session_engine.analyze_observation(photo, f"bad-{index}", [], tmp_path / str(index), RecordedProvider(fixture))
         assert result["patterns"][0]["status"] == "model_error"
         assert result["guidance"]["target"] is None
         assert result["inspections"] == []
-    fixture.write_text(json.dumps([{"id": "mark", "cost_usd": 0, "output": [{"type": "function_call", "name": "inspect_region", "call_id": "mark", "arguments": json.dumps({"box": [0, 0, 500, 500], "label": "label"})}]}]))
+    fixture.write_text(json.dumps([{"id": "mark", "cost_usd": 0, "output": [{"type": "function_call", "name": "inspect_region", "call_id": "mark", "arguments": json.dumps({"box": [0, 0, 500, 500], "label": "label", "rotation": 0})}]}]))
     monkeypatch.setattr(session_engine, "MAX_MODEL_CALLS", 1)
     result = session_engine.analyze_observation(photo, "bounded", [], tmp_path / "bounded", RecordedProvider(fixture))
     assert result["usage"]["calls"] == 1
     assert result["patterns"][0]["reason"] == "inspection_limit_reached"
     assert result["patterns"][0]["status"] == "inconclusive"
+
+
+def test_inspection_sdk_sends_changed_crop_each_round(tmp_path, monkeypatch):
+    import base64
+    import io
+
+    from openai import OpenAI
+    from pa_eval import session_engine
+    from pa_eval.provider import LiveProvider
+
+    photo = tmp_path / "photo.png"
+    source = Image.new("RGB", (100, 80), "white")
+    source.paste("red", (0, 0, 50, 40))
+    source.paste("blue", (50, 0, 100, 40))
+    source.paste("green", (0, 40, 50, 80))
+    source.save(photo)
+    monkeypatch.setattr(session_engine.vision, "locate_regions", lambda _: [{"bbox": [0, 0, 100, 80]}])
+    requests = []
+    boxes = [[0, 0, 500, 500], [500, 0, 1000, 500], [0, 500, 500, 1000]]
+
+    def handle(request):
+        requests.append(json.loads(request.content))
+        index = len(requests) - 1
+        if index < 3:
+            output = [{"type": "function_call", "name": "inspect_region", "call_id": f"crop-{index}",
+                       "arguments": json.dumps({"box": boxes[index], "label": "Printed mark", "rotation": 90})}]
+        else:
+            output = [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({
+                "status": "unclear", "next_view": "closer", "reason": "Need a sharper view."})}]}]
+        return httpx2.Response(200, json={"id": f"response-{index}", "status": "completed", "cost_usd": 0, "output": output})
+
+    with OpenAI(api_key="test-only", max_retries=0, http_client=httpx2.Client(transport=httpx2.MockTransport(handle))) as client:
+        result = session_engine.analyze_observation(photo, "zoom", [], tmp_path / "work", LiveProvider(api_key="test-only", client=client))
+    assert result["patterns"][0]["status"] == "awaiting_detail", result
+    assert len(requests) == 4 and result["usage"]["calls"] == 4
+    assert all(request["tools"] for request in requests[:-1]) and requests[-1]["tools"] == []
+    for index, (request, color) in enumerate(zip(requests[1:], ((255, 0, 0), (0, 0, 255), (0, 128, 0)))):
+        assert request["previous_response_id"] == f"response-{index}"
+        output = request["input"][0]
+        assert output["call_id"] == f"crop-{index}"
+        images = [part for part in output["output"] if part["type"] == "input_image"]
+        assert len(images) == 1
+        raw = base64.b64decode(images[0]["image_url"].split(",", 1)[1])
+        assert raw == (tmp_path / "work" / "inspections" / f"{index}-detail.png").read_bytes()
+        detail = Image.open(io.BytesIO(raw))
+        assert detail.size == (160, 200)
+        assert detail.getpixel((80, 100)) == color
+
+
+def test_unmatched_followup_keeps_printed_settings_and_candidate(tmp_path, monkeypatch):
+    from pa_eval import session_engine
+
+    photo = tmp_path / "photo.png"
+    Image.new("RGB", (100, 80), "white").save(photo)
+    monkeypatch.setattr(session_engine.vision, "locate_regions", lambda _: [{"bbox": [0, 0, 100, 80]}])
+    monkeypatch.setattr(session_engine.vision, "match_regions", lambda *args: {"status": "weak_registration"})
+    known = {"id": "known", "agent_phase": "verify", "status": "awaiting_detail",
+             "metadata": {"flow": 3.79, "acceleration": 2000},
+             "candidate": {"pa": 0.07, "line_rank": 9, "observation_id": "first"},
+             "last_image_path": str(photo), "last_region": [0, 0, 100, 80]}
+    result = session_engine.analyze_observation(photo, "rotated", [known], tmp_path / "work", object())
+    assert len(result["patterns"]) == 1
+    assert result["patterns"][0]["metadata"] == known["metadata"]
+    assert result["patterns"][0]["candidate"] == known["candidate"]
+    assert result["patterns"][0]["agent_phase"] == "verify"
+    assert result["guidance"]["action"] == "show_full_pattern" and result["usage"]["calls"] == 0
+    monkeypatch.setattr(session_engine, "MAX_VIEWS_PER_PATTERN", 2)
+    limited = session_engine.analyze_observation(photo, "still-unmatched", result["patterns"], tmp_path / "work", object())
+    assert limited["patterns"][0]["status"] == "inconclusive"
+    assert limited["guidance"]["action"] == "scan_next"
 
 
 def test_cancel_suppresses_late_progress_and_result(tmp_path, monkeypatch):

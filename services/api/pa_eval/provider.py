@@ -75,12 +75,12 @@ class RecordedProvider:
         return self._next(request)
 
     def request_agent(self, image_path: str | Path, phase: str,
-                      previous_response_id: str | None = None) -> dict[str, Any]:
-        request = build_agent_request(image_path, phase, previous_response_id)
+                      previous_response_id: str | None = None, metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        request = build_agent_request(image_path, phase, previous_response_id, metadata)
         return self._next(request)
 
-    def continue_inspection(self, image_path, phase, previous_response_id, call_id, marked_path, detail_path):
-        return self._next(build_inspection_continuation(image_path, phase, previous_response_id, call_id, marked_path, detail_path))
+    def continue_inspection(self, image_path, phase, previous_response_id, call_id, detail_path, remaining_inspections, metadata=None):
+        return self._next(build_inspection_continuation(image_path, phase, previous_response_id, call_id, detail_path, remaining_inspections, metadata))
 
     def _next(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._index >= len(self._responses):
@@ -116,12 +116,12 @@ class LiveProvider:
         return self._send(request)
 
     def request_agent(self, image_path: str | Path, phase: str,
-                      previous_response_id: str | None = None) -> dict[str, Any]:
-        request = build_agent_request(image_path, phase, previous_response_id)
+                      previous_response_id: str | None = None, metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        request = build_agent_request(image_path, phase, previous_response_id, metadata)
         return self._send(request)
 
-    def continue_inspection(self, image_path, phase, previous_response_id, call_id, marked_path, detail_path):
-        return self._send(build_inspection_continuation(image_path, phase, previous_response_id, call_id, marked_path, detail_path))
+    def continue_inspection(self, image_path, phase, previous_response_id, call_id, detail_path, remaining_inspections, metadata=None):
+        return self._send(build_inspection_continuation(image_path, phase, previous_response_id, call_id, detail_path, remaining_inspections, metadata))
 
     def _send(self, request: Mapping[str, Any]) -> dict[str, Any]:
         start = time.monotonic()

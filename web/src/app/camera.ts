@@ -6,6 +6,7 @@ export type Quality = {
   motion: number;
   rawMotion: number;
   fingerprint: Uint8Array;
+  framing: Uint8Array;
 };
 
 function motionAfterSmallShift(
@@ -135,6 +136,7 @@ export class CameraCapture {
       motion: motionScore,
       rawMotion,
       fingerprint,
+      framing: framingSample(gray),
     };
   }
 
@@ -215,4 +217,110 @@ export class CameraCapture {
 
 export function fingerprintDistance(a: Uint8Array, b: Uint8Array): number {
   return a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0) / a.length;
+}
+
+// Average before registration so individual print edges and sensor noise do not dominate.
+function framingSample(gray: Uint8Array): Uint8Array {
+  const frame = new Uint8Array(80 * 60);
+  for (let y = 0; y < 60; y++) {
+    for (let x = 0; x < 80; x++) {
+      const i = y * 320 + x * 2;
+      frame[y * 80 + x] = (gray[i] + gray[i + 1] + gray[i + 160] + gray[i + 161]) / 4;
+    }
+  }
+  return frame;
+}
+
+export type Enlargement = {
+  ready: boolean;
+  scale: number;
+  correlation: number;
+  separation: number;
+};
+
+export function measureEnlargement(reference: Uint8Array, current: Uint8Array): Enlargement {
+  const smooth = (frame: Uint8Array): Uint8Array => {
+    const result = frame.slice();
+    for (let y = 1; y < 59; y++) {
+      for (let x = 1; x < 79; x++) {
+        const i = y * 80 + x;
+        result[i] =
+          (frame[i] * 4 +
+            (frame[i - 1] + frame[i + 1] + frame[i - 80] + frame[i + 80]) * 2 +
+            frame[i - 81] +
+            frame[i - 79] +
+            frame[i + 79] +
+            frame[i + 81]) /
+          16;
+      }
+    }
+    return result;
+  };
+  // Suppress fine-line aliasing before comparing differently sized views.
+  reference = smooth(smooth(reference));
+  current = smooth(smooth(current));
+  let best = { scale: 1, correlation: -1 };
+  let unchanged = -1;
+  const correlationAt = (scale: number, dx: number, dy: number): number => {
+    let a = 0,
+      b = 0,
+      aa = 0,
+      bb = 0,
+      ab = 0,
+      count = 0;
+    for (let y = 14; y < 46; y += 2) {
+      const ry = 30 + (y - 30 - dy) / scale;
+      if (ry < 0 || ry >= 59) continue;
+      const iy = Math.floor(ry),
+        fy = ry - iy;
+      for (let x = 20; x < 60; x += 2) {
+        const rx = 40 + (x - 40 - dx) / scale;
+        if (rx < 0 || rx >= 79) continue;
+        const ix = Math.floor(rx),
+          fx = rx - ix;
+        const i = iy * 80 + ix;
+        const v =
+          (reference[i] * (1 - fx) + reference[i + 1] * fx) * (1 - fy) +
+          (reference[i + 80] * (1 - fx) + reference[i + 81] * fx) * fy;
+        const w = current[y * 80 + x];
+        a += v;
+        b += w;
+        aa += v * v;
+        bb += w * w;
+        ab += v * w;
+        count++;
+      }
+    }
+    const va = aa - (a * a) / count,
+      vb = bb - (b * b) / count;
+    if (count < 300 || va / count < 36 || vb / count < 36) return -1;
+    return (ab - (a * b) / count) / Math.sqrt(va * vb);
+  };
+  // Translation absorbs hand tremor and small reframing; normalized correlation rejects lighting changes.
+  for (const scale of [0.9, 1, 1.06, 1.12, 1.18, 1.26, 1.36, 1.5, 1.6, 1.7, 2]) {
+    let score = -1,
+      bestX = 0,
+      bestY = 0;
+    for (let dy = -12; dy <= 12; dy += 2) {
+      for (let dx = -12; dx <= 12; dx += 2) {
+        const candidate = correlationAt(scale, dx, dy);
+        if (candidate > score) {
+          score = candidate;
+          bestX = dx;
+          bestY = dy;
+        }
+      }
+    }
+    for (let dy = bestY - 1; dy <= bestY + 1; dy++)
+      for (let dx = bestX - 1; dx <= bestX + 1; dx++)
+        score = Math.max(score, correlationAt(scale, dx, dy));
+    if (scale <= 1.12) unchanged = Math.max(unchanged, score);
+    if (score > best.correlation) best = { scale, correlation: score };
+  }
+  const separation = best.correlation - unchanged;
+  return {
+    ...best,
+    separation,
+    ready: best.scale >= 1.18 && best.correlation >= 0.8 && separation >= 0.05,
+  };
 }

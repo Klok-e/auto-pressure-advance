@@ -12,6 +12,7 @@ from typing import Any, Mapping
 from jsonschema import Draft202012Validator
 
 PHASES = ("identify", "metadata", "candidate", "verify")
+MAX_INSPECTION_ROUNDS = 3
 MODEL = "gpt-6-luna"
 CAMERA_ACTIONS = ("closer", "show_full_pattern", "improve_lighting", "hold_still")
 
@@ -43,7 +44,7 @@ _QUESTIONS = {
 }
 _INSTRUCTIONS = {
     "identify": "Use only the photo. Answer supported, unsupported, or unclear. Request one better view when unclear.",
-    "metadata": "Read both printed values from the photo. Flow is a percent; acceleration is in mm/s². If either is unreadable, request one better view.",
+    "metadata": "Read the single flow and acceleration settings, printed separately from the row of PA labels. Retain settings already read for this matched pattern; inspect any missing value. Use read only when both settings are known. Otherwise use need_view and request one better view.",
     "candidate": "Compare adjacent corners by visible shape. Select one only when its printed PA label is readable. Count every V corner, including unlabelled ones, starting with 1 at the lowest printed PA end. Return that count as line_rank. Explain the comparison briefly. Never infer PA from spacing or settings.",
     "verify": "Assess this new photo independently. Compare adjacent corners and read the best corner's printed PA label. Count every V corner from the lowest printed PA end, starting with 1, and return line_rank. Do not defer to an earlier choice.",
 }
@@ -53,6 +54,7 @@ def build_agent_request(
     image_path: str | Path,
     phase: str,
     previous_response_id: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one phase request containing exactly one original-detail image."""
     if phase not in SCHEMAS:
@@ -67,8 +69,9 @@ def build_agent_request(
         "instructions": (
             "Examine only visible print and geometry. Keep answers brief. "
             "Use null for unreadable values. Ask for at most one camera action. "
-            "Do not invent labels or measurements. Use inspect_region once when a closer look or a precise pointer helps. "
-            "Its box is integer coordinates 0..1000 in this photo, ordered left, top, right, bottom. "
+            "Do not invent labels or measurements. Use inspect_region to zoom in or turn text upright before requesting another photo. "
+            f"You may inspect up to {MAX_INSPECTION_ROUNDS} regions in this step, one at a time. "
+            "Boxes always use integer coordinates 0..1000 in this step's original photo, ordered left, top, right, bottom, even after zooming. "
             "The returned rectangle is your pointer, never printed geometry or text. "
             "Before asking for a closer view, mark the required area if it is visible. "
             "In metadata, mark the printed settings; in candidate or verify, mark the corners being compared. " + _INSTRUCTIONS[phase]
@@ -78,15 +81,19 @@ def build_agent_request(
             {"type": "input_image", "image_url": f"data:{mime};base64,{image}", "detail": "original"},
         ]}],
         "reasoning": {"effort": "medium"},
-        "tools": [{"type": "function", "name": "inspect_region", "description": "Mark one region and inspect its native-resolution detail.",
+        "tools": [{"type": "function", "name": "inspect_region", "description": "Crop a region of the original photo, enlarge it up to 4x, and optionally rotate it clockwise. Enlargement adds no physical detail.",
                    "strict": True, "parameters": _schema({
                        "box": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 1000}, "minItems": 4, "maxItems": 4},
                        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+                       "rotation": {"type": "integer", "enum": [0, 90, 180, 270]},
                    })}],
         "parallel_tool_calls": False,
         "store": True,
         "text": {"format": {"type": "json_schema", "name": f"pa_agent_{phase}", "strict": True, "schema": SCHEMAS[phase]}},
     }
+    settings = {key: metadata[key] for key in ("flow", "acceleration") if metadata and metadata.get(key) is not None}
+    if settings:
+        request["instructions"] += " Printed settings already read for this matched pattern: " + json.dumps(settings) + "."
     if previous_response_id is not None:
         if not isinstance(previous_response_id, str) or not previous_response_id:
             raise ValueError("previous_response_id must be a nonempty string")
@@ -132,13 +139,13 @@ def validate_agent_response(response: Mapping[str, Any], phase: str) -> list[str
 
 
 def build_inspection_continuation(image_path: str | Path, phase: str, previous_response_id: str,
-                                  call_id: str, marked_path: Path, detail_path: Path) -> dict[str, Any]:
-    request = build_agent_request(image_path, phase, previous_response_id)
-    images = []
-    for path in (marked_path, detail_path):
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        images.append({"type": "input_image", "image_url": f"data:image/png;base64,{encoded}", "detail": "original"})
+                                  call_id: str, detail_path: Path, remaining_inspections: int,
+                                  metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    request = build_agent_request(image_path, phase, previous_response_id, metadata)
+    encoded = base64.b64encode(detail_path.read_bytes()).decode("ascii")
     request["input"] = [{"type": "function_call_output", "call_id": call_id, "output": [
-        {"type": "input_text", "text": "First: original photo with your rectangle. Second: unmodified native-resolution detail. The rectangle is only a pointer. Now answer the phase question."}, *images]}]
-    request["tools"] = []
+        {"type": "input_text", "text": f"Here is the requested clean zoomed crop, rotated as requested. No marks were added to it. The original photo remains earlier in this step. {remaining_inspections} inspections remain; any new box still refers to the original photo. Answer the phase question when ready."},
+        {"type": "input_image", "image_url": f"data:image/png;base64,{encoded}", "detail": "original"}]}]
+    if remaining_inspections <= 0:
+        request["tools"] = []
     return request

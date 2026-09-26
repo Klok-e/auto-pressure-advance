@@ -17,7 +17,7 @@ import {
   Results,
   Session,
 } from './api';
-import { CameraCapture, fingerprintDistance, Quality } from './camera';
+import { CameraCapture, fingerprintDistance, measureEnlargement, Quality } from './camera';
 import { Diagnostics } from './diagnostics';
 import {
   activeObservation,
@@ -135,6 +135,10 @@ export class App implements OnInit, OnDestroy {
   private captureCount = 0;
   private lastCaptureAt = 0;
   private lastFingerprint?: Uint8Array;
+  private lastCaptureFraming?: Uint8Array;
+  private closerReference?: Uint8Array;
+  private closerRequested = false;
+  private lastCloserLog = 0;
   private lastQualityLog = 0;
   private scanNextSince?: number;
   private activeObservation?: string;
@@ -274,6 +278,9 @@ export class App implements OnInit, OnDestroy {
     this.timer = undefined;
     this.camera?.stop();
     this.camera = undefined;
+    this.closerReference = undefined;
+    this.closerRequested = false;
+    this.lastCaptureFraming = undefined;
     this.log.log('camera_stopped');
   }
 
@@ -286,6 +293,16 @@ export class App implements OnInit, OnDestroy {
 
   private setGuidance(guidance?: Guidance): void {
     if (!guidance) return;
+    if (guidance.action === 'closer') {
+      if (!this.closerRequested) {
+        this.closerReference = this.lastCaptureFraming;
+        this.lastCloserLog = 0;
+      }
+      this.closerRequested = true;
+    } else {
+      this.closerRequested = false;
+      this.closerReference = undefined;
+    }
     this.guidance.set(guidance);
     if (guidance.phase) this.inspectionPhase.set(guidance.phase);
     this.progress.set(guidance.reason || 'Fit one whole V-shaped print in the camera');
@@ -411,7 +428,32 @@ export class App implements OnInit, OnDestroy {
         this.waitForView(quality.reason, quality);
         return;
       }
+      if (this.closerRequested) {
+        // An explicit restart has no capture reference; require enlargement from its first ready view.
+        this.closerReference ??= quality.framing;
+        const enlargement = measureEnlargement(this.closerReference, quality.framing);
+        if (Date.now() - this.lastCloserLog > 4000 || (enlargement.ready && !this.stableFrames)) {
+          this.log.log('closer_gate', {
+            requestedAction: this.guidance().action,
+            state: enlargement.ready ? 'enlarged' : 'waiting',
+            scale: +enlargement.scale.toFixed(2),
+            correlation: +enlargement.correlation.toFixed(3),
+            separation: +enlargement.separation.toFixed(3),
+            minimumScale: 1.18,
+            minimumCorrelation: 0.8,
+            minimumSeparation: 0.05,
+          });
+          this.lastCloserLog = Date.now();
+        }
+        if (!enlargement.ready) {
+          this.stableFrames = 0;
+          this.steadyProgress.set(0);
+          this.waitForView('closer', quality);
+          return;
+        }
+      }
       if (
+        !this.closerRequested &&
         this.lastFingerprint &&
         fingerprintDistance(quality.fingerprint, this.lastFingerprint) < 7
       ) {
@@ -440,7 +482,7 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  private waitForView(reason: Quality['reason'] | 'unchanged', quality: Quality): void {
+  private waitForView(reason: Quality['reason'] | 'unchanged' | 'closer', quality: Quality): void {
     if (this.gateReason !== reason) {
       const now = Date.now();
       this.log.log('capture_wait', {
@@ -459,7 +501,10 @@ export class App implements OnInit, OnDestroy {
     }
     const waiting = Date.now() - this.gateSince;
     this.setActivity('framing');
-    if (reason === 'unchanged') {
+    if (reason === 'closer') {
+      this.setCue('closer');
+      this.progress.set('Bring the phone closer so the same print looks larger · keep it in view');
+    } else if (reason === 'unchanged') {
       const requested = this.guidance();
       this.setCue(
         requested.phase === 'verify' || requested.action === 'hold_still'
@@ -594,6 +639,9 @@ export class App implements OnInit, OnDestroy {
     if (run !== this.run) return;
     this.captureCount++;
     this.lastFingerprint = quality.fingerprint;
+    this.lastCaptureFraming = quality.framing;
+    this.closerRequested = false;
+    this.closerReference = undefined;
     this.log.log('still_selected', {
       key,
       method: still.method,

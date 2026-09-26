@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import base64
 import math
 import uuid
 import time
 from pathlib import Path
 from typing import Any, Callable
 
+from PIL import Image
+
 from . import vision
-from .agent_protocol import PHASES, validate_agent_response
+from .agent_protocol import MAX_INSPECTION_ROUNDS, PHASES, validate_agent_response
 from .inspection import inspection_call, render_inspection
 from .provider import LiveProvider, ProviderError, RecordedProvider
 
@@ -24,12 +27,15 @@ def _guidance(action: str, reason: str, phase: str | None = None, target: dict |
     return {"action": action, "reason": reason, "phase": phase, "target": target}
 
 
-def _logged_envelope(value: Any) -> Any:
+def _logged_envelope(value: Any, images: dict[str, dict] | None = None) -> Any:
     if isinstance(value, dict):
-        return {key: "<image omitted; crop stored separately>" if key == "image_url" else _logged_envelope(item)
-                for key, item in value.items()}
+        logged = {key: "<image omitted>" if key == "image_url" else _logged_envelope(item, images)
+                  for key, item in value.items()}
+        if "image_url" in value:
+            logged.update((images or {}).get(value["image_url"], {"image_file": None}))
+        return logged
     if isinstance(value, list):
-        return [_logged_envelope(item) for item in value]
+        return [_logged_envelope(item, images) for item in value]
     return value
 
 
@@ -58,10 +64,13 @@ def _advance(update: dict, response: dict, observation_id: str) -> tuple[dict, s
         if status == "supported":
             update.update(agent_phase="metadata", reason=None)
             return _guidance("closer", "Show the printed flow and acceleration."), "metadata"
-    elif phase == "metadata" and status == "read":
-        update.update(metadata={"flow": response["flow"], "acceleration": response["acceleration"]},
-                      agent_phase="candidate", reason=None)
-        return _guidance("closer", "Show the corners and their PA marks."), "candidate"
+    elif phase == "metadata":
+        metadata = dict(update.get("metadata") or {})
+        metadata.update({key: response[key] for key in ("flow", "acceleration") if response[key] is not None})
+        update["metadata"] = metadata
+        if status == "read":
+            update.update(agent_phase="candidate", reason=None)
+            return _guidance("closer", "Show the corners and their PA marks."), "candidate"
     elif phase == "candidate" and status == "assessed":
         update.update(candidate={"pa": response["pa"], "line_rank": response["line_rank"],
                                  "observation_id": observation_id}, agent_phase="verify", reason=None)
@@ -118,12 +127,35 @@ def analyze_observation(
     prior_calls = sum(int(pattern.get("model_calls", 0)) for pattern in patterns)
     prior_cost = sum(float(pattern.get("model_cost_usd", 0.0)) for pattern in patterns)
     call_count, cost_total = prior_calls, prior_cost
+    region_matches = [_region_match(image_path, region, patterns) for region in regions]
+    pending = [pattern for pattern in patterns if pattern.get("status") in {"awaiting_detail", "model_error"}]
+    pending_ids = {pattern["id"] for pattern in pending}
+    for index, (_, registrations) in enumerate(region_matches):
+        events.append({"event": "region_registration", "observation_id": observation_id,
+                       "region_index": index, "matches": registrations})
+    if pending and not any(matched and matched["id"] in pending_ids for matched, _ in region_matches):
+        retained = []
+        for pattern in patterns:
+            update = dict(pattern)
+            if pattern["id"] in pending_ids:
+                update["unmatched_views"] = int(pattern.get("unmatched_views", 0)) + 1
+                if update["unmatched_views"] >= MAX_VIEWS_PER_PATTERN:
+                    update.update(status="inconclusive", reason="pattern_match_limit_reached")
+                events.append({"event": "pattern_view_unmatched", "pattern_id": pattern["id"],
+                               "phase": pattern.get("agent_phase"), "attempts": update["unmatched_views"],
+                               "reason": "Saved labels retained; new view has not been matched to this pattern."})
+            retained.append(update)
+        waiting = [pattern for pattern in retained if pattern["id"] in pending_ids and pattern["status"] != "inconclusive"]
+        guidance = (_guidance("show_full_pattern", "Show the same whole pattern, including its printed labels, to reconnect this view.", waiting[0].get("agent_phase"))
+                    if waiting else _guidance("scan_next", "Could not reconnect this pattern. Find another."))
+        return {"patterns": retained, "guidance": guidance, "events": events,
+                "usage": {"calls": 0, "cost_usd": 0.0}, "progress": progress, "inspections": inspections}
     updates = []
     next_guidance = _guidance("scan_next", "Find another PA pattern.")
     for index, region in enumerate(regions):
-        matched, registrations = _region_match(image_path, region, patterns)
-        events.append({"event": "region_registration", "observation_id": observation_id,
-                       "region_index": index, "matches": registrations})
+        matched, registrations = region_matches[index]
+        if pending and not matched:
+            continue
         if len(registrations) > 1:
             next_guidance = _guidance("show_full_pattern", "Show one complete pattern separately.")
             continue
@@ -136,7 +168,7 @@ def analyze_observation(
         previous_response_id = update.get("last_response_id") if phase != "verify" else None
         update.update(id=pattern_id, agent_phase=phase, attempts=attempts, status="awaiting_detail",
                       last_observation_id=observation_id, last_image_path=str(image_path),
-                      last_region=list(region["bbox"]), measurement=None)
+                      last_region=list(region["bbox"]), measurement=None, unmatched_views=0)
         target = None
         crop = vision.crop_region(image_path, tuple(region["bbox"]), work_dir / "crops" / f"{index}.png")
 
@@ -150,12 +182,19 @@ def analyze_observation(
             call_count += 1
             update["model_calls"] += 1
             if continuation:
-                envelope = provider.continue_inspection(crop["crop_path"], phase, **continuation)
+                envelope = provider.continue_inspection(crop["crop_path"], phase, metadata=update.get("metadata"), **continuation)
+                sent_image = Path(continuation["detail_path"])
             else:
-                envelope = provider.request_agent(crop["crop_path"], phase, previous_response_id=previous_response_id)
+                envelope = provider.request_agent(crop["crop_path"], phase, previous_response_id=previous_response_id, metadata=update.get("metadata"))
+                sent_image = Path(crop["crop_path"])
             response_path = work_dir / "responses" / f"{index}-{phase}-{call_count}.json"
             response_path.parent.mkdir(parents=True, exist_ok=True)
-            response_path.write_text(json.dumps(_logged_envelope(envelope), indent=2) + "\n")
+            image_bytes = sent_image.read_bytes()
+            with Image.open(sent_image) as image:
+                image_info = {"image_file": str(sent_image), "image_size": list(image.size),
+                              "image_bytes": len(image_bytes), "image_role": "inspection_detail" if continuation else "source_photo"}
+            images = {"data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii"): image_info}
+            response_path.write_text(json.dumps(_logged_envelope(envelope, images), indent=2) + "\n")
             cost = envelope.get("cost_usd")
             if isinstance(cost, (int, float)) and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0:
                 cost_total += cost
@@ -179,18 +218,25 @@ def analyze_observation(
             try:
                 envelope = request()
                 call = inspection_call(envelope)
-                if call:
+                rounds = 0
+                while call:
+                    if rounds >= MAX_INSPECTION_ROUNDS:
+                        raise ValueError("inspection tool limit exceeded")
+                    rounds += 1
                     inspection_index = len(inspections)
                     marked_path, detail_path = render_inspection(crop["crop_path"], call, work_dir / "inspections", inspection_index)
                     target = {"observation_id": observation_id, "inspection_index": inspection_index,
                               "box": call["box"], "label": call["label"]}
                     inspections.append(target)
                     report(phase, "inspecting", target)
-                    events.append({"event": "region_inspected", "phase": phase, "target": target})
+                    with Image.open(detail_path) as detail:
+                        detail_size = list(detail.size)
+                    events.append({"event": "region_inspected", "phase": phase, "target": target,
+                                   "rotation": call["rotation"], "inspection_round": rounds,
+                                   "image_size": detail_size, "image_path": str(detail_path)})
                     envelope = request({"previous_response_id": envelope["id"], "call_id": call["call_id"],
-                                        "marked_path": marked_path, "detail_path": detail_path})
-                    if inspection_call(envelope):
-                        raise ValueError("inspection tool limit exceeded")
+                                        "detail_path": detail_path, "remaining_inspections": MAX_INSPECTION_ROUNDS - rounds})
+                    call = inspection_call(envelope)
                 response = json.loads(envelope["output_text"])
                 errors = validate_agent_response(response, phase)
                 if errors:

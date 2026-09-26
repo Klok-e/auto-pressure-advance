@@ -297,7 +297,7 @@ async def _process_one(app: FastAPI, observation_id: str) -> None:
                             "region_index", "matches", "previous_response_id", "provider_status", "usage",
                             "latency_ms", "errors", "attempts", "measurement", "response_path", "crop_path",
                             "error_type", "candidate_pa", "candidate_line_rank", "verified_pa", "verified_line_rank",
-                            "next_phase", "next_view", "target", "http_status",
+                            "next_phase", "next_view", "target", "http_status", "rotation", "inspection_round", "image_path",
                         ) if key in item}
                         _event(conn, session_id, str(item.get("event", item.get("type", "engine_event")))[:80], observation_id, **safe)
                 _event(conn, session_id, "observation_complete", observation_id, revision=revision, stage=stage, guidance_action=guidance.get("action"), usage=result.get("usage"))
